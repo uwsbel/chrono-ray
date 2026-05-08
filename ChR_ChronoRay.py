@@ -235,19 +235,33 @@ class ChR_ChronoRay:
         session.report({self.metric: value})
 
     def run(self):
-        """
-        DESCRIPTION: 
-        Entry point - configure and execute the Ray Tune optimisation.
+    """
+    DESCRIPTION: 
+    Entry point - configure and execute the Ray Tune optimisation.
 
-        ASSUMPTIONS: 
-        - None 
+    ASSUMPTIONS: 
+    - None 
 
-        INPUT(S):   None
-        RETURNS:    ray.tune.ResultGrid
-        THROWS:     None
-        """
+    INPUT(S):   None
+    RETURNS:    ray.tune.ResultGrid
+    THROWS:     None
+    """
+        import os
+        import logging
+        from datetime import datetime
+
+        # suppress Ray console output
+        os.environ["RAY_AIR_NEW_OUTPUT"] = "0"
+        logging.getLogger("ray").setLevel(logging.WARNING)
+        logging.getLogger("ray.tune").setLevel(logging.WARNING)
+
+        # redirect Ray logs to timestamped file
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        log_path = os.path.join(os.getcwd(), f"chr_ray_log_{timestamp}.txt")
+        logging.basicConfig(filename=log_path, level=logging.WARNING)
+
         if not ray.is_initialized():
-            ray.init()
+            ray.init(logging_level=logging.WARNING, log_to_driver=False)
 
         built_search_alg = self._build_search_alg()   # None for GRID
 
