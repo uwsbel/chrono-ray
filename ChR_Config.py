@@ -1,6 +1,100 @@
 import ray 
 from ray import tune
 from typing import Sequence, Callable, Iterable, Any
+from enum import Enum
+import textwrap
+
+#********************************************************************
+# DIRECTORY 
+# 1. [SEARCH ALGORITHMS] ChR_SearchAlg (Enum) - search algorithms
+# 2. [DISTRIBUTIONS] ChR_Distr (Class w/ static methods) - statistical distributions
+#********************************************************************
+
+#================================================================================
+# 1. SEARCH ALGORITHMS
+#================================================================================
+"""
+Searcher compatibility quick-reference
+---------------------------------------
+Searcher          | needs metric/mode | supports concurrent | typical use
+------------------|-------------------|---------------------|-------------------------------
+RANDOM            | no                | yes (unlimited)     | baseline / large spaces
+GRID              | no                | yes (unlimited)     | small discrete spaces
+BAYESOPT          | yes               | limited (1-8)       | cheap fn, small param count
+OPTUNA            | yes               | yes                 | general purpose, most popular
+HYPEROPT          | yes               | limited             | tree-structured spaces
+BOHB              | yes               | limited             | needs paired BOHB scheduler
+AX                | yes               | yes                 | expensive fn, constraints
+HEBO              | yes               | limited             | high-dim Bayesian
+NEVERGRAD         | yes               | yes                 | black-box, gradient-free
+ZOOPT             | yes               | limited             | noisy / discrete spaces
+"""
+
+class ChR_SearchAlg(Enum):
+    """
+    Ray Tune search algorithms.
+
+    Pass as `search_algorithm=ChronoRaySearchAlgorithm.OPTUNA` (etc.) to ChronoRay.
+
+    RANDOM      - uniform random sampling (no extra dependency)
+    GRID        - exhaustive grid search  (no extra dependency)
+    BAYESOPT    - Gaussian-process Bayesian optimisation  [pip: bayesian-optimization]
+    OPTUNA      - Optuna TPE / CMA-ES / others            [pip: optuna]
+    HYPEROPT    - Tree-structured Parzen Estimators        [pip: hyperopt]
+    BOHB        - Bayesian Optimisation + HyperBand        [pip: hpbandster ConfigSpace]
+                  Must be paired with TrialScheduler.BOHB_SCHED
+    AX          - Adaptive Experimentation Platform        [pip: ax-platform]
+    HEBO        - Heteroscedastic Evolutionary BO          [pip: hebo]
+    NEVERGRAD   - Gradient-free optimisation toolbox       [pip: nevergrad]
+    ZOOPT       - Zeroth-order optimisation                [pip: zoopt]
+    """
+    def __new__(cls, sequential, metric_mode):
+        obj = object.__new__(cls)
+        obj._value_ = len(cls.__members__) + 1
+        obj.sequential  = sequential
+        obj.metric_mode = metric_mode
+        return obj
+
+    @staticmethod
+    def info() -> None:
+        print("========================================================")
+        print("Available ChR_SearchAlg search algorithms:")
+        print("========================================================")
+        print(f"  {'Algorithm':<12} {'Sequential':<12} {'Needs metric/mode':<20} Notes")
+        print(f"  {'-'*12} {'-'*12} {'-'*20} {'-'*30}")
+        for alg in ChR_SearchAlg:
+            seq  = "yes" if alg.sequential  else "no"
+            mm   = "yes" if alg.metric_mode else "no"
+            print(f"  {alg.name:<12} {seq:<12} {mm:<20}")
+        print(textwrap.dedent("""
+            Notes:
+                RANDOM    - no extra dependency
+                GRID      - no extra dependency
+                BAYESOPT  - pip install bayesian-optimization
+                OPTUNA    - pip install optuna
+                HYPEROPT  - pip install hyperopt
+                BOHB      - pip install hpbandster ConfigSpace
+                AX        - pip install ax-platform
+                HEBO      - pip install hebo
+                NEVERGRAD - pip install nevergrad
+                ZOOPT     - pip install zoopt
+        """))
+        print("========================================================")
+
+    RANDOM    = (False, False)
+    GRID      = (False, False)
+    BAYESOPT  = (True,  True)
+    OPTUNA    = (False, True)
+    HYPEROPT  = (True,  True)
+    BOHB      = (True,  True)
+    AX        = (False, True)
+    HEBO      = (True,  True)
+    NEVERGRAD = (False, True)
+    ZOOPT     = (True,  True)
+
+#================================================================================
+# 2. DISTRIBUTIONS
+#================================================================================   
 
 """
 A thin, self-contained bridge to every Ray Tune sampling distribution.
@@ -131,7 +225,10 @@ class ChR_Distr:
         d = tune.choice(categories)
         d.FLAG_is_chr_distr = True
         return d
-
+    
+    class _ChRDistrDict(dict): 
+        pass 
+    
     @staticmethod
     def grid_search(values: Iterable):
         """
@@ -143,7 +240,7 @@ class ChR_Distr:
         Good for: a small known set of values you want to evaluate completely.
         Note: best paired with SearchAlgorithm.GRID.
         """
-        d = tune.grid_search(values)
+        d = ChR_Distr._ChRDistrDict(tune.grid_search(values))
         d.FLAG_is_chr_distr = True
         return d
 
@@ -238,7 +335,10 @@ class ChR_Distr:
 
     @staticmethod
     def _format_distr(d) -> str:
-        attrs = {k: v for k, v in vars(d).items() if k != "sampler"}
+        if isinstance(d, ChR_Distr._ChRDistrDict):
+            return f"grid_search(values={list(d.get('grid_search', []))})"
+        
+        attrs = {k: v for k, v in vars(d).items() if k not in ("sampler", "FLAG_is_chr_distr")}
         
         if hasattr(d, "sampler"):
             distr_name = type(d.sampler).__name__.strip("_")
@@ -252,9 +352,9 @@ class ChR_Distr:
     def info() -> None:
         import inspect
         print("========================================================")
-        print("Available ChRDistr sampling distributions:")
+        print("Available ChR_Distr sampling distributions:")
         print("========================================================")
-        for name, method in inspect.getmembers(ChRDistr, predicate=callable):
+        for name, method in inspect.getmembers(ChR_Distr, predicate=callable):
             if not name.startswith("_"):
                 doc = inspect.getdoc(method)
                 print(f"\n  {name}")

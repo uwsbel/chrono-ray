@@ -1,8 +1,9 @@
 from enum import Enum
 from collections.abc import Callable
+import textwrap
 
-from ChR_Distr import ChR_Distr
 from ChR_ChronoRay import ChR_ChronoRay
+from ChR_Config import ChR_Distr, ChR_SearchAlg
 
 class ChRParamEst:
 
@@ -11,81 +12,117 @@ class ChRParamEst:
         print("========================================================")
         print("ChRParamEst - ChronoRay (PyChrono + Ray) Parameter Estimation Workflow")
         print("========================================================")
-        print("""
+        print(textwrap.dedent("""
             DESCRIPTION:
                 ChRParamEst is a parameter estimation framework for PyChrono simulations.
                 It automatically tunes simulation parameters to match a set of target
                 output values using Ray Tune as the search backend.
 
-            ARGUMENTS:
+            --------------------------------------------------------
+            CONSTRUCTOR ARGUMENTS:
+            --------------------------------------------------------
+
                 simulate_fn (Callable) [REQUIRED]
                     A PyChrono simulation function.
                     INPUT:   config (dict) — parameter names and their sampled values.
                     RETURNS: output (dict) — simulation output values.
-                    NOTE:    output keys must match target_sim_outputs keys.
+                    NOTE:    output keys must match target_sim_outputs keys exactly.
                     NOTE:    no visualization (e.g. Irrlicht, VSG) should take place.
 
-                est_rule (EstRule) [REQUIRED]
+                est_rule (ChRParamEst.EstRule) [REQUIRED]
                     The estimator rule used to score each simulation run.
-                    See available options: ChRParamEst.EstRule
+                    Available options:
+                        ChRParamEst.EstRule.LS    — least squares
+                        ChRParamEst.EstRule.MLE   — maximum likelihood      
+                        ChRParamEst.EstRule.MAP   — maximum a posteriori    
+                        ChRParamEst.EstRule.BAYES — bayesian               
 
                 param_sample_space (dict[str, ChR_Distr]) [REQUIRED]
                     Parameters to tune and their search distributions.
                     Keys   : parameter names (must match keys expected by simulate_fn).
                     Values : ChR_Distr distributions defining the search space.
-                    See available distributions: ChRParamEst.ChR_Distr.info()
+                    NOTE:    run ChRParamEst.ChR_Distr.info() for available distributions.
 
                 target_sim_outputs (dict[str, float]) [REQUIRED]
-                    Target output values to match.
+                    Target output values to compare against simulation outputs.
                     Keys   : output names (must match keys returned by simulate_fn).
                     Values : target float values.
 
-                est_config (dict) [OPTIONAL]
+                est_config (dict) [OPTIONAL, default: None]
                     Additional configuration for the estimator rule.
-                    Default: None
+                    NOTE:    not yet in use — reserved for future estimator rules.
 
-                total_trials (int) [OPTIONAL]
+                total_trials (int) [OPTIONAL, default: 10]
                     Total number of simulation trials to run.
-                    Default: 10
 
-                FLAG_auto_run (bool) [OPTIONAL]
-                    If True, the estimation runs immediately on construction.
-                    If False, configure manually then call build() and run().
-                    Default: True
+                FLAG_auto_run (bool) [OPTIONAL, default: True]
+                    Controls the operating mode. See OPERATING MODES below.
 
-            QUICK START (auto-run):
+            --------------------------------------------------------
+            OPERATING MODES:
+            --------------------------------------------------------
 
-                est = ChRParamEst(
-                    simulate_fn        = my_sim,
-                    est_rule           = ChRParamEst.EstRule.LS,
-                    param_sample_space = {
-                        "k": ChRParamEst.ChR_Distr.uniform(0, 10),
-                        "m": ChRParamEst.ChR_Distr.loguniform(1e-2, 1e2),
-                    },
-                    target_sim_outputs = {
-                        "output_1": 5.0,
-                        "output_2": 3.2,
-                    }
-                )
+                MODE 1 — FLAG_auto_run=True (default)
+                    The estimation runs immediately on construction.
+                    No further configuration is possible.
 
-            MANUAL RUN (configure before running):
+                    Example:
+                        est = ChRParamEst(
+                            simulate_fn        = my_sim,
+                            est_rule           = ChRParamEst.EstRule.LS,
+                            param_sample_space = {
+                                "k": ChRParamEst.ChR_Distr.uniform(0, 10),
+                                "m": ChRParamEst.ChR_Distr.loguniform(1e-2, 1e2),
+                            },
+                            target_sim_outputs = {
+                                "output_1": 5.0,
+                                "output_2": 3.2,
+                            }
+                        )
 
-                est = ChRParamEst(..., FLAG_auto_run=False)
-                est.set_search_alg(ChR_SearchAlg.OPTUNA)
-                est.set_max_concurrent_trials(2)
-                est.set_resources_per_trial(cpu=4, gpu=0)
-                est.build()
-                est.run()
+                MODE 2 — FLAG_auto_run=False
+                    Construction stops after validation and config report.
+                    The user can then configure optional settings via the
+                    setters listed below before manually building and running.
 
-            OPTIONAL SETTERS (only valid when FLAG_auto_run=False):
-                est.set_search_alg(alg)               — set search algorithm
-                est.set_search_alg_config(cfg)        — set search algorithm kwargs
-                est.set_max_concurrent_trials(n)      — set max concurrent trials
-                est.set_resources_per_trial(cpu, gpu) — set resources per trial
-                """)
+                    Example:
+                        est = ChRParamEst(
+                            simulate_fn        = my_sim,
+                            est_rule           = ChRParamEst.EstRule.LS,
+                            param_sample_space = {...},
+                            target_sim_outputs = {...},
+                            FLAG_auto_run      = False
+                        )
+                        est.set_search_alg(ChR_SearchAlg.OPTUNA)
+                        est.set_max_concurrent_trials(2)
+                        est.set_resources_per_trial(cpu=4, gpu=0)
+                        est.set_search_alg_config({"n_startup_trials": 10})
+                        est._build_chrono_ray()
+                        est.run()
+
+            --------------------------------------------------------
+            OPTIONAL SETTERS (MODE 2 only):
+            --------------------------------------------------------
+
+                set_search_alg(alg: ChR_SearchAlg)
+                    Set the search algorithm. Default: ChR_SearchAlg.BAYESOPT
+
+                set_search_alg_config(cfg: dict)
+                    Pass extra kwargs to the search algorithm constructor.
+                    See Ray Tune documentation for available options.
+
+                set_max_concurrent_trials(n: int)
+                    Set the maximum number of trials running simultaneously.
+                    Default: 4
+
+                set_resources_per_trial(cpu: int, gpu: int)
+                    Set the CPU/GPU resources allocated per trial.
+                    Default: cpu=1, gpu=0
+        """))
         print("========================================================")
 
     ChR_Distr = ChR_Distr
+    ChR_SearchAlg = ChR_SearchAlg
 
     class EstRule(Enum):
         LS = "least squares"
@@ -115,7 +152,7 @@ class ChRParamEst:
         self.max_concurrent_trials = 4 
         self.resources_per_trial = {"cpu": 1, "gpu": 0}
         self.search_alg = ChR_SearchAlg.BAYESOPT
-        self.search_alg_config = None
+        self.search_alg_config = {}
 
         self._validate_inputs()
         self._report_config()
@@ -151,7 +188,7 @@ class ChRParamEst:
             raise TypeError("param_sample_space keys must all be strings")
 
         if not all(getattr(v, "FLAG_is_chr_distr", False) for v in self.param_sample_space.values()):
-            raise TypeError("param_sample_space values must all be ChR_Distr distributions. Use ChRParamEst.ChR_Distr.info() for available options.")
+            raise TypeError("param_sample_space values must all be ChR_Distr distributions. Use ChRParamEst.ChR_Distr.info() for available options and additional info.")
 
         #4. simulation target outputs check 
         if not isinstance(self.target_sim_outputs, dict):
@@ -173,17 +210,23 @@ class ChRParamEst:
 
         print("************************************************************")
         print("========================================================")
-        print("ChParamEst (\"ChronoRay Parameter Estimation Workflow\") configuration:")
+        print("ChRParamEst (\"ChronoRay Parameter Estimation Workflow\") configuration:")
         print("========================================================")
         print(f"  1. simulate_fn        : {self.simulate_fn.__name__}")
         print(f"  2. est_rule           : {self.est_rule.value}")
         print(f"  3. param_sample_space :")
 
         for name, distr in self.param_sample_space.items():
-            print(f"    {name} : {ChR_Distr._format_distr(distr)}")
+            print(f"       {name} : {ChR_Distr._format_distr(distr)}")
 
-        print(f"  4. target_sim_outputs  : {self.target_sim_outputs}")
+        print(f"  4. target_sim_outputs : {self.target_sim_outputs}")
         print(f"  5. est_config         : {self.est_config}")
+        print(f"  6. search_algorithm   : {self.search_alg.name}")
+
+        if self.search_alg == ChR_SearchAlg.BAYESOPT:
+            print(f"     NOTE: default search algorithm in use.")
+            print(f"     -> run ChRParamEst.ChR_SearchAlg.info() for available search algorithms and additional info.")
+
         print("************************************************************")
 
     def _get_est_fn(self) -> tuple[Callable, str]:
@@ -196,7 +239,7 @@ class ChRParamEst:
                     raise KeyError(
                         f"simulate_fn output is missing key(s): {missing}. "
                         f"Expected keys: {list(target.keys())}"
-                        f"NOTE: keys must be identicle in name (including case) and order."
+                        f"NOTE: keys must be identical in name (including case) and order."
                     )
                 return sum(
                     (sim_output[k] - target[k]) ** 2
@@ -236,14 +279,14 @@ class ChRParamEst:
 
     def _build_chrono_ray(self) -> ChR_ChronoRay:
 
-        if self.chrono_ray is not None and self.chrono_ray.FLAG_auto_run:
+        if self.chrono_ray is not None and self.FLAG_auto_run:
             raise ValueError("Cannot rebuild since chrono_ray has already been built and (auto-)run has started.")
 
         est_fn, mode = self._get_est_fn()
 
         return ChR_ChronoRay(
             simulate_fn=self.simulate_fn,
-            evaluate_fn=est_fn,
+            objective_fn=est_fn,
             param_space=self.param_sample_space,
             resources_per_trial=self.resources_per_trial,
             num_trials=self.total_trials,
