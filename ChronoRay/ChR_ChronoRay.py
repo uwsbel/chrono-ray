@@ -235,17 +235,17 @@ class ChR_ChronoRay:
         session.report({self.metric: value})
 
     def run(self):
-    """
-    DESCRIPTION: 
-    Entry point - configure and execute the Ray Tune optimisation.
+        """
+        DESCRIPTION: 
+        Entry point - configure and execute the Ray Tune optimisation.
 
-    ASSUMPTIONS: 
-    - None 
+        ASSUMPTIONS: 
+        - None 
 
-    INPUT(S):   None
-    RETURNS:    ray.tune.ResultGrid
-    THROWS:     None
-    """
+        INPUT(S):   None
+        RETURNS:    ray.tune.ResultGrid
+        THROWS:     None
+        """
         import os
         import logging
         from datetime import datetime
