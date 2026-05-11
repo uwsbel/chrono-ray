@@ -177,7 +177,7 @@ class ChRParamEst:
             raise ValueError("simulate_fn must be callable")
 
         #2. est_rule check
-        if not isinstance(self.est_rule, EstRule):
+        if not isinstance(self.est_rule, ChRParamEst.EstRule):
             raise ValueError("est_rule must be a valid EstRule")
 
         #3. parameter configuration checks
