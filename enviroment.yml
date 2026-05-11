@@ -1,0 +1,10 @@
+name: ChronoRay
+channels:
+  - projectchrono
+  - defaults
+dependencies:
+  - pychrono
+  - numpy
+  - pip
+  - pip:
+    - ray
