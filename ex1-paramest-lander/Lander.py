@@ -39,18 +39,18 @@ class Lander:
 
     #NOTE: currently disabled 
     #lander attributes that can be set via setter function 
-    # _ALLOWED_PARAMS = {  
-    # #lander base parameters 
-    # "mass",
-    # "inertia",
+    _ALLOWED_PARAMS = {  
+    #lander base parameters 
+    "mass",
+    "inertia",
 
-    # #angles for strut construction 
-    # "beta",
-    # "alpha2",
+    #angles for strut construction 
+    "beta",
+    "alpha2",
 
-    # #honeycomb 
-    # "fy", 
-    # }
+    #honeycomb 
+    "fy", 
+    }
 
     #====================================================
     #<3 CONSTRUCTOR 
