@@ -234,7 +234,7 @@ class ChR_ChronoRay:
 
         session.report({self.metric: value})
 
-    def run(self, log_to_file: bool = False):
+    def run(self, FLAG_log_to_file: bool = False):
         """
         DESCRIPTION: 
         Entry point - configure and execute the Ray Tune optimisation.
@@ -242,7 +242,7 @@ class ChR_ChronoRay:
         ASSUMPTIONS: 
         - None 
 
-        INPUT(S):   log_to_file (bool) [OPTIONAL, default: False]
+        INPUT(S):   FLAG_log_to_file (bool) [OPTIONAL, default: False]
                     If True, Ray's console output is redirected to a timestamped
                     .txt file in the current working directory. User prints in
                     the main script will also be redirected. Default keeps all
@@ -264,7 +264,7 @@ class ChR_ChronoRay:
             logging.getLogger(name).propagate = False
 
         # redirect Ray output to a timestamped file only if explicitly requested
-        if log_to_file:
+        if self.FLAG_log_to_file:
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
             log_path = os.path.join(os.getcwd(), f"chr_ray_log_{timestamp}.txt")
             logging.basicConfig(filename=log_path, level=logging.ERROR)
