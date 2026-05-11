@@ -264,7 +264,7 @@ class ChR_ChronoRay:
             logging.getLogger(name).propagate = False
 
         # redirect Ray output to a timestamped file only if explicitly requested
-        if self.FLAG_log_to_file:
+        if FLAG_log_to_file:
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
             log_path = os.path.join(os.getcwd(), f"chr_ray_log_{timestamp}.txt")
             logging.basicConfig(filename=log_path, level=logging.ERROR)
