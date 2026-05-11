@@ -7,7 +7,7 @@ import time
 #==============================================================
 #==============================================================
 #<3 SIMULATION OPTIONS (NOTE: please change to suit your needs!)
-lander_location = chrono.ChVector3d(0, 0, 1)
+lander_location = chrono.ChVector3d(0, 0, 4)
 ground_position = chrono.ChVector3d(0, 0, 0) #where the ground plane is located 
 ground_length = 10.0 #m  
 ground_width  = 10.0 #m
@@ -18,7 +18,7 @@ hz = ground_height / 2
 
 #<3 SYSTEM 
 sys = chrono.ChSystemNSC()
-sys.SetGravitationalAcceleration(chrono.ChVector3d(0, 0, 0))
+sys.SetGravitationalAcceleration(chrono.ChVector3d(0, 0, -9.81))
 
 #==============================================================
 #==============================================================
@@ -38,7 +38,7 @@ ground_body.SetPos(ground_position + chrono.ChVector3d(0, 0, -hz))
 ground_body.EnableCollision(True)
 ground_body.AddCollisionShape(chrono.ChCollisionShapeBox(l.cmaterial, ground_width, ground_length, hz))
 ground_body.GetCollisionModel().SetFamily(GROUND_FAMILY)
-# sys.AddBody(ground_body)
+sys.AddBody(ground_body)
 ground_shape = chrono.ChVisualShapeBox(ground_width, ground_length, hz)
 ground_shape.SetColor(chrono.ChColor(0.2, 0.7, 0.3))
 ground_body.AddVisualShape(ground_shape)
@@ -67,5 +67,13 @@ while l.hit_ground() == False:
     
 e_absorbed = l.get_energy_absorbed()
 print(f"Peak Acceleration: {peak_accel}")
-print(f"Energy Absorbed: {e_absorbed}")
 
+# cool_down = 1000
+
+# for i in range(cool_down):
+#     vis.Render()
+#     sys.DoStepDynamics(dt)
+#     # print(l.get_pos().z)
+
+print(f"Energy Absorbed: {l.get_energy_absorbed()}")
+print(f"Initial Energy: {l.get_energy_initial()}")

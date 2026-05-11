@@ -151,11 +151,10 @@ class HoneycombForceFunctor(chrono.ForceFunctor):
         self.last_vn.append(vn)
         self.last_bn_internal.append(self.bn)
 
-        if(len(self.last_xn) > 1):
-            dx = xn - self.last_xn[-1]
-            if dx < 0 and l > 0:
-                F_avg = 0.5 * (l + self.lambda_stash)
-                self.E_leg += F_avg * (-1*dx)
+        if(len(self.last_bn) > 1):
+            dbn = self.bn - self.last_bn[-2]  # > 0 only when crushing actually occurs (case 2c)
+            if dbn > 0:
+                self.E_leg += self.fy * dbn
 
         # handle l_star safely
         try:

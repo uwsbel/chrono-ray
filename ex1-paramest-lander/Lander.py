@@ -79,7 +79,7 @@ class Lander:
         self.num_struts = 6                                 #number of struts (legs) attatched to lander body
         
         #<3 [STRUT SPECIFIC PARAMS] LEG LENGTHS (that can be precomputed)
-        self.l = (self.h1 + 0.5*self.h2)/(math.sin(self.alpha2)) #l: length of center strut leg (fully extended) 
+        self.l = 1.825#(self.h1 + 0.5*self.h2)/(math.sin(self.alpha2)) #l: length of center strut leg (fully extended) 
 
         self.e_leg_length = self.l*(9/10) 
         self.b_leg_length = self.l*(1/10) 
@@ -114,8 +114,8 @@ class Lander:
         self.base_pos = chrono.ChVector3d(0, 0, 0)
         self.base_body = None 
 
-        self.footpad_mesh_file = "./footpad_meshes/im_footpad.obj"
-        self.footpad_points_file = "./footpad_meshes/im_footpad_points.csv"
+        self.footpad_mesh_file = "./im_footpad.obj"
+        self.footpad_points_file = "./im_footpad_points.csv"
         self.footpad_mass = 10
     #====================================================
     #<3 FUNC TO HELP WITH MODELING 
@@ -436,6 +436,7 @@ class Lander:
         base_center = lander_bottom_pos + chrono.ChVector3d(0, 0, self.h2/2.0)
         base_attachment_point = lander_bottom_pos + chrono.ChVector3d(0, 0, self.h2_offset)
         self.base_pos = base_center
+
         base_body.SetPos(base_center)
         base_body.SetRot(user_rot)
         base_body.SetFrameCOMToAbs(chrono.ChFramed(lander_bottom_pos + self.com_offset, user_rot))
@@ -490,13 +491,14 @@ class Lander:
     #====================================================
 
     def get_pos(self): 
-        return self.base_body.GetPos()
+        return self.lander_bodies[0].GetPos()
 
     def hit_ground(self):
-        return self.base_body.GetPos().z <= 0 + (self.h2 / 2.0)
+        tolerance = 0.5
+        return self.lander_bodies[0].GetPos().z <= 0 + self.h1 + (self.h2 / 2.0) - tolerance
 
     def get_accel(self): 
-        return self.base_body.GetPosDt2().Length() 
+        return self.lander_bodies[0].GetPosDt2().Length() 
 
     def get_hc_ref_dist(self): 
         return self.hcff_list[0].get_s_ref()
