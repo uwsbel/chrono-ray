@@ -1,8 +1,8 @@
 from collections.abc import Callable
 import textwrap
 
-from ChR_Backend import ChR_Backend
-from ChR_Config import ChR_Distr, ChR_SearchAlg
+from ChronoRay.ChR_ChronoRay import ChR_ChronoRay
+from ChronoRay.ChR_Config import ChR_Distr, ChR_SearchAlg
 
 class ChRBayesOpt:
 
@@ -197,12 +197,12 @@ class ChRBayesOpt:
             raise ValueError("Cannot set resources_per_trial after (auto-)run has started")
         self.resources_per_trial = {"cpu": cpu, "gpu": gpu}
 
-    def _build_backend(self) -> ChR_Backend:
+    def _build_backend(self) -> ChR_ChronoRay:
 
         if self.backend is not None and self.FLAG_auto_run:
             raise ValueError("Cannot rebuild since backend has already been built and (auto-)run has started.")
 
-        return ChR_Backend(
+        return ChR_ChronoRay(
             simulate_fn=self.simulate_fn,
             objective_fn=self.objective_fn,
             param_space=self.param_sample_space,

@@ -13,7 +13,7 @@ import ray
 from ray import tune
 from ray.tune.search import ConcurrencyLimiter
 from ray.air import session
-from ChR_Config import ChR_SearchAlg
+from ChronoRay.ChR_Config import ChR_SearchAlg
 
 
 

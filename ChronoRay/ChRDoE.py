@@ -6,7 +6,7 @@ import itertools
 import ray
 import numpy as np
 
-from ChR_Config import ChR_Distr
+from ChronoRay.ChR_Config import ChR_Distr
 
 
 class ChRDoE:

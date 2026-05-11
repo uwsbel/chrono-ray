@@ -2,8 +2,8 @@ from enum import Enum
 from collections.abc import Callable
 import textwrap
 
-from ChR_ChronoRay import ChR_ChronoRay
-from ChR_Config import ChR_Distr, ChR_SearchAlg
+from ChronoRay.ChR_ChronoRay import ChR_ChronoRay
+from ChronoRay.ChR_Config import ChR_Distr, ChR_SearchAlg
 
 class ChRParamEst:
 
