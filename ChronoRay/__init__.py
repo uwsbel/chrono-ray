@@ -1,1 +1,6 @@
 from ChronoRay.ChRParamEst import ChRParamEst
+from ChronoRay.ChR_Config import ChR_Distr, ChR_SearchAlg
+from ChronoRay.ChR_ChronoRay import ChR_ChronoRay
+from ChronoRay.ChRBayesOpt import ChRBayesOpt
+from ChronoRay.ChRDoE import ChRDoE
+from ChronoRay.ChROpt import ChROpt
