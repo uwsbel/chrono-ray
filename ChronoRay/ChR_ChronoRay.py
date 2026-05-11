@@ -276,6 +276,8 @@ class ChR_ChronoRay:
                     self.file.write(msg)
                 def flush(self):
                     self.file.flush()
+                def fileno(self):
+                    return self.file.fileno()
 
             log_file = open(log_path, "w")
             sys.stdout = _TeeStream(log_file)
