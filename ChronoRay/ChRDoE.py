@@ -67,6 +67,11 @@ class ChRDoE:
                         "k" → 5 evenly spaced values across its range
                         "m" → 4 log-spaced values across its range
 
+                FLAG_log_to_file (bool) [OPTIONAL, default: False]
+                    If True, Ray's console output is redirected to a timestamped
+                    .txt file in the current working directory. User prints are also 
+                    redirected to .txt file. Default keeps all output in the console.
+
                 FLAG_auto_run (bool) [OPTIONAL, default: True]
                     Controls the operating mode. See OPERATING MODES below.
 
@@ -108,6 +113,7 @@ class ChRDoE:
                         doe = ChRDoE(..., FLAG_auto_run=False)
                         doe.set_max_concurrent_trials(8)
                         doe.set_resources_per_trial(cpu=2, gpu=0)
+                        doe.set_FLAG_log_to_file(True)
                         doe._build()
                         doe.run()
 
@@ -122,6 +128,9 @@ class ChRDoE:
                 set_resources_per_trial(cpu: int, gpu: int)
                     Set the CPU/GPU resources allocated per trial.
                     Default: cpu=1, gpu=0
+
+                set_FLAG_log_to_file(flag: bool)
+                    Toggle whether Ray output is redirected to a file. Default: False
         """))
         print("========================================================")
 
@@ -139,6 +148,7 @@ class ChRDoE:
                 sampling_design: SamplingDesign,
                 num_trials: int = 10,
                 factorial_level_spacing: dict[str, int] = None,
+                FLAG_log_to_file: bool = False,
                 FLAG_auto_run: bool = True) -> None:
 
         #1. mandatory parameters
@@ -151,6 +161,7 @@ class ChRDoE:
         #2. optional parameters
         self.max_concurrent_trials = 4
         self.resources_per_trial   = {"cpu": 1, "gpu": 0}
+        self.FLAG_log_to_file           = FLAG_log_to_file
 
         self._validate_inputs()
         self._report_config()
@@ -254,6 +265,8 @@ class ChRDoE:
             print(f"  4. total configs      : {total} (full factorial)")
         else:
             print(f"  4. num_trials        : {self.num_trials}")
+
+        print(f"  5. FLAG_log_to_file        : {self.FLAG_log_to_file}")
 
         print("************************************************************")
 
@@ -387,6 +400,11 @@ class ChRDoE:
             raise ValueError("Cannot set resources_per_trial after (auto-)run has started")
         self.resources_per_trial = {"cpu": cpu, "gpu": gpu}
 
+    def set_FLAG_log_to_file(self, flag: bool) -> None:
+        if self.FLAG_auto_run:
+            raise ValueError("Cannot set FLAG_log_to_file after (auto-)run has started")
+        self.FLAG_log_to_file = flag
+
     def _build(self) -> None:
         if self._configs is not None and self.FLAG_auto_run:
             raise ValueError("Cannot rebuild since configs have already been generated and (auto-)run has started.")
@@ -398,19 +416,42 @@ class ChRDoE:
             raise ValueError("Configs have not been generated yet. Call _build() first.")
 
         import os
+        import sys
         import logging
         from datetime import datetime
 
+        # suppress Ray console output
         os.environ["RAY_AIR_NEW_OUTPUT"] = "0"
-        logging.getLogger("ray").setLevel(logging.WARNING)
-        logging.getLogger("ray.tune").setLevel(logging.WARNING)
+        os.environ["TUNE_DISABLE_AUTO_CALLBACK_LOGGERS"] = "1"
 
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        log_path  = os.path.join(os.getcwd(), f"chr_doe_log_{timestamp}.txt")
-        logging.basicConfig(filename=log_path, level=logging.WARNING)
+        for name in ["ray", "ray.tune", "ray.tune.registry", "ray._private"]:
+            logging.getLogger(name).setLevel(logging.ERROR)
+            logging.getLogger(name).propagate = False
+
+        # redirect Ray output to a timestamped file only if explicitly requested
+        if self.FLAG_log_to_file:
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            log_path  = os.path.join(os.getcwd(), f"chr_doe_log_{timestamp}.txt")
+            logging.basicConfig(filename=log_path, level=logging.ERROR)
+
+            class _TeeStream:
+                def __init__(self, file):
+                    self.file = file
+                def write(self, msg):
+                    self.file.write(msg)
+                def flush(self):
+                    self.file.flush()
+
+            log_file = open(log_path, "w")
+            sys.stdout = _TeeStream(log_file)
+            sys.stderr = _TeeStream(log_file)
 
         if not ray.is_initialized():
-            ray.init(logging_level=logging.WARNING, log_to_driver=False)
+            ray.init(
+                logging_level=logging.ERROR,
+                log_to_driver=False,
+                configure_logging=False
+            )
 
         self.FLAG_auto_run = True
 

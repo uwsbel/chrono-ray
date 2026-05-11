@@ -234,7 +234,7 @@ class ChR_ChronoRay:
 
         session.report({self.metric: value})
 
-    def run(self):
+    def run(self, log_to_file: bool = False):
         """
         DESCRIPTION: 
         Entry point - configure and execute the Ray Tune optimisation.
@@ -242,11 +242,16 @@ class ChR_ChronoRay:
         ASSUMPTIONS: 
         - None 
 
-        INPUT(S):   None
+        INPUT(S):   log_to_file (bool) [OPTIONAL, default: False]
+                    If True, Ray's console output is redirected to a timestamped
+                    .txt file in the current working directory. User prints in
+                    the main script will also be redirected. Default keeps all
+                    output in the console.
         RETURNS:    ray.tune.ResultGrid
         THROWS:     None
         """
         import os
+        import sys
         import logging
         from datetime import datetime
 
@@ -258,10 +263,23 @@ class ChR_ChronoRay:
             logging.getLogger(name).setLevel(logging.ERROR)
             logging.getLogger(name).propagate = False
 
-        # redirect Ray logs to timestamped file
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        log_path = os.path.join(os.getcwd(), f"chr_ray_log_{timestamp}.txt")
-        logging.basicConfig(filename=log_path, level=logging.ERROR)
+        # redirect Ray output to a timestamped file only if explicitly requested
+        if log_to_file:
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            log_path = os.path.join(os.getcwd(), f"chr_ray_log_{timestamp}.txt")
+            logging.basicConfig(filename=log_path, level=logging.ERROR)
+
+            class _TeeStream:
+                def __init__(self, file):
+                    self.file = file
+                def write(self, msg):
+                    self.file.write(msg)
+                def flush(self):
+                    self.file.flush()
+
+            log_file = open(log_path, "w")
+            sys.stdout = _TeeStream(log_file)
+            sys.stderr = _TeeStream(log_file)
 
         if not ray.is_initialized():
             ray.init(

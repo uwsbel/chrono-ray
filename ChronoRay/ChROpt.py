@@ -52,6 +52,11 @@ class ChROpt:
                 total_trials (int) [OPTIONAL, default: 10]
                     Total number of simulation trials to run.
 
+                FLAG_log_to_file (bool) [OPTIONAL, default: False]
+                    If True, Ray's console output is redirected to a timestamped
+                    .txt file in the current working directory. User prints are also 
+                    redirected to .txt file. Default keeps all output in the console.
+
                 FLAG_auto_run (bool) [OPTIONAL, default: True]
                     Controls the operating mode. See OPERATING MODES below.
 
@@ -91,6 +96,7 @@ class ChROpt:
                         opt.set_search_alg_config({"n_startup_trials": 10})
                         opt.set_max_concurrent_trials(2)
                         opt.set_resources_per_trial(cpu=4, gpu=0)
+                        opt.set_FLAG_log_to_file(True)
                         opt._build_backend()
                         opt.run()
 
@@ -113,6 +119,9 @@ class ChROpt:
                 set_resources_per_trial(cpu: int, gpu: int)
                     Set the CPU/GPU resources allocated per trial.
                     Default: cpu=1, gpu=0
+
+                set_FLAG_log_to_file(flag: bool)
+                    Toggle whether Ray output is redirected to a file. Default: False
         """))
         print("========================================================")
 
@@ -126,6 +135,7 @@ class ChROpt:
                 param_sample_space: dict[str, ChR_Distr],
                 mode: str,
                 total_trials: int = 10,
+                FLAG_log_to_file: bool = False,
                 FLAG_auto_run: bool = True) -> None:
 
         #1. mandatory parameters
@@ -140,6 +150,7 @@ class ChROpt:
         self.resources_per_trial = {"cpu": 1, "gpu": 0}
         self.search_alg = ChR_SearchAlg.BAYESOPT
         self.search_alg_config = {}
+        self.FLAG_log_to_file = FLAG_log_to_file
 
         self._validate_inputs()
         self._report_config()
@@ -196,6 +207,7 @@ class ChROpt:
         print(f"  4. mode               : {self.mode}")
         print(f"  5. total_trials       : {self.total_trials}")
         print(f"  6. search_algorithm   : {self.search_alg.name}")
+        print(f"  7. FLAG_log_to_file        : {self.FLAG_log_to_file}")
 
         if self.search_alg == ChR_SearchAlg.BAYESOPT:
             print(f"     NOTE: default search algorithm in use.")
@@ -224,6 +236,11 @@ class ChROpt:
             raise ValueError("Cannot set resources_per_trial after (auto-)run has started")
         self.resources_per_trial = {"cpu": cpu, "gpu": gpu}
 
+    def set_FLAG_log_to_file(self, flag: bool) -> None:
+        if self.FLAG_auto_run:
+            raise ValueError("Cannot set FLAG_log_to_file after (auto-)run has started")
+        self.FLAG_log_to_file = flag
+
     def _build_backend(self) -> ChR_ChronoRay:
 
         if self.backend is not None and self.FLAG_auto_run:
@@ -246,4 +263,4 @@ class ChROpt:
             raise ValueError("backend has not been built yet. Call _build_backend() first.")
 
         self.FLAG_auto_run = True
-        self.backend.run()
+        self.backend.run(FLAG_log_to_file=self.FLAG_log_to_file)
