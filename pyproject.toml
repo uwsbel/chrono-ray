@@ -5,3 +5,6 @@ dependencies = [
     "ray",
     "numpy",
 ]
+
+[tool.setuptools.packages.find]
+include = ["ChronoRay*"]
