@@ -232,7 +232,7 @@ class ChRParamEst:
     def _get_est_fn(self) -> tuple[Callable, str]:
         target = self.target_sim_outputs
 
-        if self.est_rule == EstRule.LS:
+        if self.est_rule == ChRParamEst.EstRule.LS:
             def est_fn(sim_output: dict) -> float:
                 missing = [k for k in target.keys() if k not in sim_output]
                 if missing:
