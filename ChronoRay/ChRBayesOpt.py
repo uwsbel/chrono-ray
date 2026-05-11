@@ -95,7 +95,7 @@ class ChRBayesOpt:
                         )
                         opt.set_max_concurrent_trials(2)
                         opt.set_resources_per_trial(cpu=4, gpu=0)
-                        opt.set_log_to_file(True)
+                        opt.set_FLAG_log_to_file(True)
                         opt._build_backend()
                         opt.run()
 
@@ -111,7 +111,7 @@ class ChRBayesOpt:
                     Set the CPU/GPU resources allocated per trial.
                     Default: cpu=1, gpu=0
 
-                set_log_to_file(flag: bool)
+                set_FLAG_log_to_file(flag: bool)
                     Toggle whether Ray output is redirected to a file. Default: False
         """))
         print("========================================================")
@@ -209,7 +209,7 @@ class ChRBayesOpt:
             raise ValueError("Cannot set resources_per_trial after (auto-)run has started")
         self.resources_per_trial = {"cpu": cpu, "gpu": gpu}
 
-    def set_log_to_file(self, flag: bool) -> None:
+    def set_FLAG_log_to_file(self, flag: bool) -> None:
         if self.FLAG_auto_run:
             raise ValueError("Cannot set FLAG_log_to_file after (auto-)run has started")
         self.FLAG_log_to_file = flag

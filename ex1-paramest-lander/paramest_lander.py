@@ -86,4 +86,5 @@ param_est = ChRParamEst(simulate_fn=simulate_fn,
                         est_rule=ChRParamEst.EstRule.LS, 
                         param_sample_space=param_sample_space, 
                         target_sim_outputs=target_sim_outputs,
-                        total_trials=50)
+                        total_trials=50, 
+                        FLAG_log_to_file=True)

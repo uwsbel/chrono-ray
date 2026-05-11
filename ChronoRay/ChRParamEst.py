@@ -56,7 +56,7 @@ class ChRParamEst:
                 total_trials (int) [OPTIONAL, default: 10]
                     Total number of simulation trials to run.
 
-                FLAG_log_to_file (bool) [OPTIONAL, default: False]
+                FLAG_FLAG_log_to_file (bool) [OPTIONAL, default: False]
                     If True, Ray's console output is redirected to a timestamped
                     .txt file in the current working directory. User prints are also 
                     redirected to .txt file. Default keeps all output in the console.
@@ -103,7 +103,7 @@ class ChRParamEst:
                         est.set_max_concurrent_trials(2)
                         est.set_resources_per_trial(cpu=4, gpu=0)
                         est.set_search_alg_config({"n_startup_trials": 10})
-                        est.set_log_to_file(True)
+                        est.set_FLAG_log_to_file(True)
                         est._build_chrono_ray()
                         est.run()
 
@@ -126,7 +126,7 @@ class ChRParamEst:
                     Set the CPU/GPU resources allocated per trial.
                     Default: cpu=1, gpu=0
 
-                set_log_to_file(flag: bool)
+                set_FLAG_log_to_file(flag: bool)
                     Toggle whether Ray output is redirected to a file. Default: False
         """))
         print("========================================================")
@@ -148,7 +148,7 @@ class ChRParamEst:
                 target_sim_outputs: dict[str, float],
                 est_config: dict = None, 
                 total_trials: int = 10,
-                log_to_file: bool = False,
+                FLAG_log_to_file: bool = False,
                 FLAG_auto_run: bool = True) -> None:
 
         #1. manditory parameters 
@@ -164,7 +164,7 @@ class ChRParamEst:
         self.resources_per_trial = {"cpu": 1, "gpu": 0}
         self.search_alg = ChR_SearchAlg.BAYESOPT
         self.search_alg_config = {}
-        self.log_to_file = log_to_file
+        self.FLAG_log_to_file = FLAG_log_to_file
 
         self._validate_inputs()
         self._report_config()
@@ -234,7 +234,7 @@ class ChRParamEst:
         print(f"  4. target_sim_outputs : {self.target_sim_outputs}")
         print(f"  5. est_config         : {self.est_config}")
         print(f"  6. search_algorithm   : {self.search_alg.name}")
-        print(f"  7. log_to_file        : {self.log_to_file}")
+        print(f"  7. FLAG_log_to_file        : {self.FLAG_log_to_file}")
 
         if self.search_alg == ChR_SearchAlg.BAYESOPT:
             print(f"     NOTE: default search algorithm in use.")
@@ -290,11 +290,11 @@ class ChRParamEst:
 
         self.search_alg_config = search_alg_config
 
-    def set_log_to_file(self, flag: bool) -> None:
+    def set_FLAG_log_to_file(self, flag: bool) -> None:
         if self.FLAG_auto_run:
-            raise ValueError("Cannot set log_to_file after (auto-)run has started")
+            raise ValueError("Cannot set FLAG_log_to_file after (auto-)run has started")
 
-        self.log_to_file = flag
+        self.FLAG_log_to_file = flag
 
     def _build_chrono_ray(self) -> ChR_ChronoRay:
 
@@ -321,4 +321,4 @@ class ChRParamEst:
 
         self.FLAG_auto_run = True
 
-        self.chrono_ray.run(log_to_file=self.log_to_file)
+        self.chrono_ray.run(FLAG_log_to_file=self.FLAG_log_to_file)
