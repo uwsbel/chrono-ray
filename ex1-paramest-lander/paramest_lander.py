@@ -64,17 +64,18 @@ def simulate_fn(config):
 
     #<3 SIM LOOP 
     dt = 1e-3
-    peak_accel = 0.0 
+    peak_accel = 0.0
+    max_steps = 3000
+    steps = 0
 
-    while l.hit_ground() == False:
+    while l.hit_ground() == False and steps < max_steps:
         sys.DoStepDynamics(dt)
-
         curr_accel = l.get_accel()
         if curr_accel > peak_accel:
             peak_accel = curr_accel
-        
-    e_absorbed = l.get_energy_absorbed()
+        steps += 1
 
+    e_absorbed = l.get_energy_absorbed()
     return {
         "peak_accel": peak_accel,
         "energy_absorbed": e_absorbed
