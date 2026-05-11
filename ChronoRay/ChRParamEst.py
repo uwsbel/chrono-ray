@@ -149,7 +149,7 @@ class ChRParamEst:
         self.total_trials = total_trials
 
         #2. optional parameters 
-        self.max_concurrent_trials = 4 
+        self.max_concurrent_trials = 2
         self.resources_per_trial = {"cpu": 1, "gpu": 0}
         self.search_alg = ChR_SearchAlg.BAYESOPT
         self.search_alg_config = {}
