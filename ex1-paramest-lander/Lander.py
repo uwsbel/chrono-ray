@@ -183,9 +183,9 @@ class Lander:
         body.SetPos((p0 + p1) * 0.5)
         self.sys.AddBody(body)
 
-        shape = chrono.ChVisualShapeCylinder(radius, L)
-        shape.SetColor(color)
-        body.AddVisualShape(shape)
+        # shape = chrono.ChVisualShapeCylinder(radius, L)
+        # shape.SetColor(color)
+        # body.AddVisualShape(shape)
 
         return body, L
 
@@ -229,9 +229,9 @@ class Lander:
 
         self.sys.AddBody(e_body)
 
-        e_shape = chrono.ChVisualShapeCylinder(self.e_leg_radius, self.e_leg_length)
-        e_shape.SetColor(chrono.ChColor(130/255, 150/255, 237/255))
-        e_body.AddVisualShape(e_shape)
+        # e_shape = chrono.ChVisualShapeCylinder(self.e_leg_radius, self.e_leg_length)
+        # e_shape.SetColor(chrono.ChColor(130/255, 150/255, 237/255))
+        # e_body.AddVisualShape(e_shape)
     
         self.lander_bodies.append(e_body)
         self.lander_radii.append(self.e_leg_radius)
@@ -255,9 +255,9 @@ class Lander:
         b_body.GetCollisionModel().AllowCollisionsWith(self.LANDER_FAMILY)
         self.sys.AddBody(b_body)
 
-        b_shape = chrono.ChVisualShapeCylinder(self.b_leg_radius, self.b_leg_length)
-        b_shape.SetColor(chrono.ChColor(237/255, 187/255, 130/255))
-        b_body.AddVisualShape(b_shape)
+        # b_shape = chrono.ChVisualShapeCylinder(self.b_leg_radius, self.b_leg_length)
+        # b_shape.SetColor(chrono.ChColor(237/255, 187/255, 130/255))
+        # b_body.AddVisualShape(b_shape)
 
         self.lander_bodies.append(b_body)
         self.lander_radii.append(self.b_leg_radius)
@@ -409,10 +409,10 @@ class Lander:
         footpad_body.GetCollisionModel().SetFamily(self.LANDER_FAMILY)
         footpad_body.GetCollisionModel().DisallowCollisionsWith(self.LANDER_FAMILY)
         self.sys.AddBody(footpad_body)
-        vis_mesh = chrono.ChVisualShapeTriangleMesh(mesh)
-        vis_mesh.SetBackfaceCull(True)
-        vis_mesh.SetColor(chrono.ChColor(200/255, 170/255, 227/255))
-        footpad_body.AddVisualShape(vis_mesh)
+        # vis_mesh = chrono.ChVisualShapeTriangleMesh(mesh)
+        # vis_mesh.SetBackfaceCull(True)
+        # vis_mesh.SetColor(chrono.ChColor(200/255, 170/255, 227/255))
+        # footpad_body.AddVisualShape(vis_mesh)
         self.footpad_bodies.append(footpad_body)
 
         #<3 SPHERICAL JOINT FOR FOOTPAD
@@ -445,9 +445,9 @@ class Lander:
         base_body.GetCollisionModel().SetFamily(self.LANDER_FAMILY)
         base_body.GetCollisionModel().DisallowCollisionsWith(self.LANDER_FAMILY)
         self.sys.AddBody(base_body)
-        base_shape = chrono.ChVisualShapeCylinder(self.r, self.h2)
-        base_shape.SetColor(chrono.ChColor(200/255, 170/255, 227/255))
-        base_body.AddVisualShape(base_shape)
+        # base_shape = chrono.ChVisualShapeCylinder(self.r, self.h2)
+        # base_shape.SetColor(chrono.ChColor(200/255, 170/255, 227/255))
+        # base_body.AddVisualShape(base_shape)
 
         self.lander_bodies.append(base_body)
         self.lander_radii.append(self.r)
