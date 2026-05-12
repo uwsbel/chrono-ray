@@ -1,8 +1,0 @@
-=== Angle of Repose Simulation Parameters ===
-
-mu_s: 0.889554411920386
-density: 1561.7811640313996
-mcc_lambda: 0.09548754546929782
-mcc_kappa: 0.00818701757763054
-Young_modulus: 2140080.4670042605
-Poisson_ratio: 0.38841543763939246

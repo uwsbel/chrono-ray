@@ -457,10 +457,9 @@ class ChRDoE:
         self.FLAG_auto_run = True
 
         # wrap _execute_trial as a Ray remote function, reserving resources per trial
-        remote_fn = ray.remote(ChRDoE._execute_trial).options(
+        remote_fn = ray.remote(max_calls=1)(ChRDoE._execute_trial).options(
             num_cpus=self.resources_per_trial["cpu"],
-            num_gpus=self.resources_per_trial["gpu"], 
-            max_calls=1, 
+            num_gpus=self.resources_per_trial["gpu"],
         )
 
         # fire off all trials in parallel — .remote() returns immediately with a future

@@ -12,11 +12,30 @@ OUTPUT_FPS = 100
 
 ## PARAMETER SAMPLE SPACE
 param_sample_space = {
-    "mu_s":          ChRDoE.ChR_Distr.uniform(0.4, 1.2),
-    "density":       ChRDoE.ChR_Distr.uniform(1520, 1780),
-    "mcc_lambda":    ChRDoE.ChR_Distr.uniform(0.02, 0.10),
-    "mcc_kappa":     ChRDoE.ChR_Distr.uniform(0.005, 0.03),
-    "Young_modulus": ChRDoE.ChR_Distr.loguniform(5e5, 5e6),
+    # MOST IMPORTANT — currently reasonable but upper end (mu_s=1.2, ~50°) 
+    # is unrealistically high for loose granular soil. Tighten slightly.
+    "mu_s":          ChRDoE.ChR_Distr.uniform(0.35, 0.90),   # was (0.4, 1.2)
+
+    # Expand significantly — you're currently in a narrow band (~17% spread).
+    # Loose fill to dense compacted sand covers ~1200–2000 kg/m³
+    "density":       ChRDoE.ChR_Distr.uniform(1200, 2000),   # was (1520, 1780)
+
+    # Expand upper end — your current range is mostly "stiff soil."
+    # Soft/loose materials (lambda 0.1–0.25) collapse very differently.
+    "mcc_lambda":    ChRDoE.ChR_Distr.uniform(0.02, 0.22),   # was (0.02, 0.10)
+
+    # # Keep kappa proportional — consider sampling as a *ratio* of lambda
+    # # instead of independently, since kappa must always << lambda.
+    # # If keeping independent, expand slightly:
+    # "mcc_kappa":     ChRDoE.ChR_Distr.uniform(0.003, 0.04),  # was (0.005, 0.03)
+
+    "kappa_ratio": ChRDoE.ChR_Distr.uniform(0.05, 0.25),
+
+    # Expand lower bound — 5e5 Pa is already fairly stiff for loose soil.
+    # Going down to 5e4 will expose elastic effects more.
+    "Young_modulus": ChRDoE.ChR_Distr.loguniform(5e4, 1e7),  # was (5e5, 5e6)
+
+    # This range is actually good — leave it.
     "Poisson_ratio": ChRDoE.ChR_Distr.uniform(0.2, 0.45),
 }
 
@@ -27,7 +46,7 @@ def _make_run_dir(config):
         f"_E{config['Young_modulus']:.2e}"
         f"_nu{config['Poisson_ratio']:.2f}"
         f"_mu{config['mu_s']:.2f}"
-        f"_k{config['mcc_kappa']:.3f}"
+        f"_k{config['kappa_ratio']:.3f}"
         f"_lam{config['mcc_lambda']:.3f}"
     )
     run_dir = os.path.join(os.getcwd(), "particles", name)
@@ -44,9 +63,9 @@ def _write_log(run_dir, config):
 
 def simulate_fn(config):
 
-    if config["mcc_kappa"] >= config["mcc_lambda"]:
-        print(f"  Skipping invalid config: kappa ({config['mcc_kappa']:.3f}) >= lambda ({config['mcc_lambda']:.3f})")
-        return
+    # if config["mcc_kappa"] >= config["mcc_lambda"]:
+    #     print(f"  Skipping invalid config: kappa ({config['mcc_kappa']:.3f}) >= lambda ({config['mcc_lambda']:.3f})")
+    #     return
 
     #1. physics systems 
     sys_mbs = chrono.ChSystemNSC()
@@ -66,7 +85,8 @@ def simulate_fn(config):
     mat_props.rheology_model = fsi.RheologyCRM_MCC
     angle_mus = math.atan(config["mu_s"])
     mat_props.mcc_M = (6.0 * math.sin(angle_mus)) / (3.0 - math.sin(angle_mus))
-    mat_props.mcc_kappa = config["mcc_kappa"]
+    kappa_ratio = config["kappa_ratio"]
+    mat_props.mcc_kappa = kappa_ratio * config["mcc_lambda"] #config["mcc_kappa"]
     mat_props.mcc_lambda = config["mcc_lambda"]
     sys_sph.SetElasticSPH(mat_props)
 
@@ -206,7 +226,7 @@ def simulate_fn(config):
 chrdoe = ChRDoE(simulate_fn, 
                 param_sample_space, 
                 sampling_design=ChRDoE.SamplingDesign.LATIN_HYPERCUBE, 
-                num_trials=20, 
+                num_trials=30, 
                 max_concurrent_trials=2, 
                 FLAG_log_to_file=True, 
                 FLAG_auto_run=True)
