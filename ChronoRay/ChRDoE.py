@@ -159,6 +159,7 @@ class ChRDoE:
         self.factorial_level_spacing     = factorial_level_spacing or {}
 
         #2. optional parameters
+        #TODO ITEM #1 
         self.resources_per_trial   = {"cpu": 1, "gpu": 0}
         self.FLAG_log_to_file           = FLAG_log_to_file
 
@@ -382,6 +383,9 @@ class ChRDoE:
 
     @staticmethod
     def _execute_trial(simulate_fn, config):
+        import os
+        #TODO ITEM #2 
+        os.environ["CUDA_VISIBLE_DEVICES"] = "0"
         simulate_fn(config)
 
 
@@ -455,7 +459,8 @@ class ChRDoE:
         # wrap _execute_trial as a Ray remote function, reserving resources per trial
         remote_fn = ray.remote(ChRDoE._execute_trial).options(
             num_cpus=self.resources_per_trial["cpu"],
-            num_gpus=self.resources_per_trial["gpu"]
+            num_gpus=self.resources_per_trial["gpu"], 
+            max_calls=1, 
         )
 
         # fire off all trials in parallel — .remote() returns immediately with a future

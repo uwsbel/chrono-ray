@@ -1,0 +1,19 @@
+======ITEM #1
+
+ChRDoE.py ~line 162 
+
+num_gpu=0 
+Ray has no idea what work is going on the GPU so for fsi code, max_concurrent_trials share the GPU at one time (slow, potential vram issues, etc.)
+Need to think of some fix for this (needs to be under the hood, user doesnt have to worry)... 
+
+======ITEM #2 
+
+ChRDoE.py ~line 387 
+
+CUDA_VISIBLE_DEVICES is consistently zero. This will be an issue if the user wants to deploy more than one CUDA device... 
+However, Ray automatically detecting then number of available CUDA devices was not working well on my linux machine at all... 
+Need to look into this more.... 
+
+@staticmethod
+def _execute_trial(simulate_fn, config):
+    simulate_fn(config)

@@ -8,7 +8,5 @@ dependencies:
   - projectchrono::pychrono
   - numpy
   - scipy
-  - pip
-  - pip:
-    - ray[tune]
-    - fsspec
+  - fsspec 
+  - ray-tune
