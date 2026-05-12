@@ -57,6 +57,9 @@ class ChRDoE:
                     Ignored for FULL_FACTORIAL (determined by factorial_level_spacing).
                     NOTE:    SOBOL requires a power-of-2 value — will auto round up.
 
+                max_concurrent_trials (int) [OPTIONAL, default: 2]
+                    Maximum number of trials running simultaneously.
+
                 factorial_level_spacing (dict[str, int]) [OPTIONAL, default: None]
                     Number of discrete levels per parameter for FULL_FACTORIAL.
                     Each continuous parameter is evenly divided into this many values
@@ -111,7 +114,6 @@ class ChRDoE:
 
                     Example:
                         doe = ChRDoE(..., FLAG_auto_run=False)
-                        doe.set_max_concurrent_trials(8)
                         doe.set_resources_per_trial(cpu=2, gpu=0)
                         doe.set_FLAG_log_to_file(True)
                         doe._build()
@@ -120,10 +122,6 @@ class ChRDoE:
             --------------------------------------------------------
             OPTIONAL SETTERS (MODE 2 only):
             --------------------------------------------------------
-
-                set_max_concurrent_trials(n: int)
-                    Set the maximum number of trials running simultaneously.
-                    Default: 4
 
                 set_resources_per_trial(cpu: int, gpu: int)
                     Set the CPU/GPU resources allocated per trial.
@@ -147,6 +145,7 @@ class ChRDoE:
                 param_sample_space: dict[str, ChR_Distr],
                 sampling_design: SamplingDesign,
                 num_trials: int = 10,
+                max_concurrent_trials: int = 2,
                 factorial_level_spacing: dict[str, int] = None,
                 FLAG_log_to_file: bool = False,
                 FLAG_auto_run: bool = True) -> None:
@@ -156,10 +155,10 @@ class ChRDoE:
         self.param_sample_space          = param_sample_space
         self.sampling_design             = sampling_design
         self.num_trials                  = num_trials
+        self.max_concurrent_trials       = max_concurrent_trials
         self.factorial_level_spacing     = factorial_level_spacing or {}
 
         #2. optional parameters
-        self.max_concurrent_trials = 4
         self.resources_per_trial   = {"cpu": 1, "gpu": 0}
         self.FLAG_log_to_file           = FLAG_log_to_file
 
@@ -390,10 +389,6 @@ class ChRDoE:
     # <3 METHODS IN USER INTERFACE
     # -------------------------------------------------------------------------
 
-    def set_max_concurrent_trials(self, max_concurrent_trials: int) -> None:
-        if self.FLAG_auto_run:
-            raise ValueError("Cannot set max_concurrent_trials after (auto-)run has started")
-        self.max_concurrent_trials = max_concurrent_trials
 
     def set_resources_per_trial(self, cpu: int, gpu: int) -> None:
         if self.FLAG_auto_run:

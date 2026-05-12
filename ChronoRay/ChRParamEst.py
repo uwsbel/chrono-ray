@@ -56,6 +56,9 @@ class ChRParamEst:
                 total_trials (int) [OPTIONAL, default: 10]
                     Total number of simulation trials to run.
 
+                max_concurrent_trials (int) [OPTIONAL, default: 2]
+                    Maximum number of trials running simultaneously.
+
                 FLAG_FLAG_log_to_file (bool) [OPTIONAL, default: False]
                     If True, Ray's console output is redirected to a timestamped
                     .txt file in the current working directory. User prints are also 
@@ -100,7 +103,6 @@ class ChRParamEst:
                             FLAG_auto_run      = False
                         )
                         est.set_search_alg(ChR_SearchAlg.OPTUNA)
-                        est.set_max_concurrent_trials(2)
                         est.set_resources_per_trial(cpu=4, gpu=0)
                         est.set_search_alg_config({"n_startup_trials": 10})
                         est.set_FLAG_log_to_file(True)
@@ -117,10 +119,6 @@ class ChRParamEst:
                 set_search_alg_config(cfg: dict)
                     Pass extra kwargs to the search algorithm constructor.
                     See Ray Tune documentation for available options.
-
-                set_max_concurrent_trials(n: int)
-                    Set the maximum number of trials running simultaneously.
-                    Default: 4
 
                 set_resources_per_trial(cpu: int, gpu: int)
                     Set the CPU/GPU resources allocated per trial.
@@ -148,6 +146,7 @@ class ChRParamEst:
                 target_sim_outputs: dict[str, float],
                 est_config: dict = None, 
                 total_trials: int = 10,
+                max_concurrent_trials: int = 2,
                 FLAG_log_to_file: bool = False,
                 FLAG_auto_run: bool = True) -> None:
 
@@ -158,9 +157,9 @@ class ChRParamEst:
         self.target_sim_outputs = target_sim_outputs
         self.est_config = est_config
         self.total_trials = total_trials
+        self.max_concurrent_trials = max_concurrent_trials
 
         #2. optional parameters 
-        self.max_concurrent_trials = 2
         self.resources_per_trial = {"cpu": 1, "gpu": 0}
         self.search_alg = ChR_SearchAlg.BAYESOPT
         self.search_alg_config = {}
@@ -266,12 +265,6 @@ class ChRParamEst:
 
 
     #<3 METHODS IN USER INTERFACE 
-    def set_max_concurrent_trials(self, max_concurrent_trials: int) -> None:
-        if self.FLAG_auto_run:
-            raise ValueError("Cannot set max_concurrent_trials after (auto-)run has started")
-
-        self.max_concurrent_trials = max_concurrent_trials
-
     def set_resources_per_trial(self, cpu: int, gpu: int) -> None:
         if self.FLAG_auto_run:
             raise ValueError("Cannot set resources_per_trial after (auto-)run has started")

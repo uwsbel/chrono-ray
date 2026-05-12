@@ -53,6 +53,9 @@ class ChRBayesOpt:
                 total_trials (int) [OPTIONAL, default: 10]
                     Total number of simulation trials to run.
 
+                max_concurrent_trials (int) [OPTIONAL, default: 2]
+                    Maximum number of trials running simultaneously.
+
                 FLAG_log_to_file (bool) [OPTIONAL, default: False]
                     If True, Ray's console output is redirected to a timestamped
                     .txt file in the current working directory. User prints are also 
@@ -93,7 +96,6 @@ class ChRBayesOpt:
                             mode               = "min",
                             FLAG_auto_run      = False
                         )
-                        opt.set_max_concurrent_trials(2)
                         opt.set_resources_per_trial(cpu=4, gpu=0)
                         opt.set_FLAG_log_to_file(True)
                         opt._build_backend()
@@ -102,10 +104,6 @@ class ChRBayesOpt:
             --------------------------------------------------------
             OPTIONAL SETTERS (MODE 2 only):
             --------------------------------------------------------
-
-                set_max_concurrent_trials(n: int)
-                    Set the maximum number of trials running simultaneously.
-                    Default: 4
 
                 set_resources_per_trial(cpu: int, gpu: int)
                     Set the CPU/GPU resources allocated per trial.
@@ -125,6 +123,7 @@ class ChRBayesOpt:
                 param_sample_space: dict[str, ChR_Distr],
                 mode: str,
                 total_trials: int = 10,
+                max_concurrent_trials: int = 2,
                 FLAG_log_to_file: bool = False,
                 FLAG_auto_run: bool = True) -> None:
 
@@ -134,9 +133,9 @@ class ChRBayesOpt:
         self.param_sample_space = param_sample_space
         self.mode = mode
         self.total_trials = total_trials
+        self.max_concurrent_trials = max_concurrent_trials
 
         #2. optional parameters
-        self.max_concurrent_trials = 4
         self.resources_per_trial = {"cpu": 1, "gpu": 0}
         self.FLAG_log_to_file = FLAG_log_to_file
 
@@ -199,11 +198,6 @@ class ChRBayesOpt:
         print("************************************************************")
 
     #<3 METHODS IN USER INTERFACE
-    def set_max_concurrent_trials(self, max_concurrent_trials: int) -> None:
-        if self.FLAG_auto_run:
-            raise ValueError("Cannot set max_concurrent_trials after (auto-)run has started")
-        self.max_concurrent_trials = max_concurrent_trials
-
     def set_resources_per_trial(self, cpu: int, gpu: int) -> None:
         if self.FLAG_auto_run:
             raise ValueError("Cannot set resources_per_trial after (auto-)run has started")
