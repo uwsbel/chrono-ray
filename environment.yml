@@ -1,11 +1,10 @@
 name: ChronoRay
 channels:
   - projectchrono
+  - conda-forge
   - defaults
 dependencies:
-  - pychrono
+  - projectchrono::pychrono
   - numpy
   - scipy
-  - pip
-  - pip:
-    - ray
+  - ray

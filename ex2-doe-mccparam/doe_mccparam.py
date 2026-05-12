@@ -206,7 +206,8 @@ def simulate_fn(config):
 chrdoe = ChRDoE(simulate_fn, 
                 param_sample_space, 
                 sampling_design=ChRDoE.SamplingDesign.LATIN_HYPERCUBE, 
-                num_trials=20, max_concurrent_trials=20, 
+                num_trials=20, 
+                max_concurrent_trials=2, 
                 FLAG_log_to_file=True, 
                 FLAG_auto_run=True)
 

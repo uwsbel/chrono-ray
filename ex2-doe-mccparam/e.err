@@ -1,0 +1,4 @@
+Traceback (most recent call last):
+  File "/srv/home/kslaton/chrono-ray/ex2-doe-mccparam/doe_mccparam.py", line 2, in <module>
+    import pychrono.fsi as fsi
+ModuleNotFoundError: No module named 'pychrono.fsi'
