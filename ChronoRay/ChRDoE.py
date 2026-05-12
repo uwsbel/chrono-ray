@@ -460,7 +460,7 @@ class ChRDoE:
 
         # fire off all trials in parallel — .remote() returns immediately with a future
         # Ray queues and runs them concurrently up to the available resource limit
-        futures = [remote_fn.remote(self.simulate_fn, config) for config in self._configs]
-
-        # block until all trials are complete
-        ray.get(futures)
+        for i in range(0, len(self._configs), self.max_concurrent_trials):
+            batch = self._configs[i:i + self.max_concurrent_trials]
+            futures = [remote_fn.remote(self.simulate_fn, config) for config in batch]
+            ray.get(futures)
