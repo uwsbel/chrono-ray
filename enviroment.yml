@@ -5,6 +5,7 @@ channels:
 dependencies:
   - pychrono
   - numpy
+  - scipy
   - pip
   - pip:
     - ray
