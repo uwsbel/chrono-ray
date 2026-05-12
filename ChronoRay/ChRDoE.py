@@ -195,11 +195,11 @@ class ChRDoE:
             raise TypeError("param_sample_space values must all be ChR_Distr distributions. Use ChRDoE.ChR_Distr.info() for available options.")
 
         #3. sampling design check
-        if not isinstance(self.sampling_design, SamplingDesign):
+        if not isinstance(self.sampling_design, ChRDoE.SamplingDesign):
             raise TypeError("sampling_design must be a ChRDoE.SamplingDesign enum member.")
 
         #4. full factorial specific checks
-        if self.sampling_design == SamplingDesign.FULL_FACTORIAL:
+        if self.sampling_design == ChRDoE.SamplingDesign.FULL_FACTORIAL:
 
             #4a. check all distributions are factorial compatible
             for name, d in self.param_sample_space.items():
@@ -245,11 +245,11 @@ class ChRDoE:
 
         for name, distr in self.param_sample_space.items():
             line = f"       {name} : {ChR_Distr._format_distr(distr)}"
-            if self.sampling_design == SamplingDesign.FULL_FACTORIAL and ChRDoE._needs_factorial_level_spacing(distr):
+            if self.sampling_design == ChRDoE.SamplingDesign.FULL_FACTORIAL and ChRDoE._needs_factorial_level_spacing(distr):
                 line += f"  [{self.factorial_level_spacing.get(name, '?')} steps]"
             print(line)
 
-        if self.sampling_design == SamplingDesign.FULL_FACTORIAL:
+        if self.sampling_design == ChRDoE.SamplingDesign.FULL_FACTORIAL:
             total = 1
             for name, d in self.param_sample_space.items():
                 ray_tune_disr_type, sampler = ChRDoE._get_distr_info(d)
@@ -307,11 +307,11 @@ class ChRDoE:
         return True
 
     def _generate_configs(self) -> list[dict]:
-        if self.sampling_design == SamplingDesign.FULL_FACTORIAL:
+        if self.sampling_design == ChRDoE.SamplingDesign.FULL_FACTORIAL:
             return self._generate_factorial_configs()
-        elif self.sampling_design == SamplingDesign.LATIN_HYPERCUBE:
+        elif self.sampling_design == ChRDoE.SamplingDesign.LATIN_HYPERCUBE:
             return self._generate_lhs_configs()
-        elif self.sampling_design == SamplingDesign.SOBOL:
+        elif self.sampling_design == ChRDoE.SamplingDesign.SOBOL:
             return self._generate_sobol_configs()
 
     def _generate_factorial_configs(self) -> list[dict]:

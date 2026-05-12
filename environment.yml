@@ -4,7 +4,11 @@ channels:
   - conda-forge
   - defaults
 dependencies:
+  - python=3.12
   - projectchrono::pychrono
   - numpy
   - scipy
-  - ray
+  - pip
+  - pip:
+    - ray[tune]
+    - fsspec
