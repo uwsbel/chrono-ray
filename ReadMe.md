@@ -28,12 +28,12 @@ Use this if you are starting fresh. This creates a full conda environment with P
 
 **1. Create the environment (miniconda or equivalent required):**
 ```bash
-conda env create -f environment.yml
+conda env create --file environment.yml -n chrono-ray
 ```
 
 **2. Activate it:**
 ```bash
-conda activate ChronoRay
+conda activate chrono-ray
 ```
 
 **3. Install ChronoRay:**
@@ -43,21 +43,4 @@ pip install -e .
 
 ---
 
-## Usage
-
-```python
-from ChronoRay import ChRParamEst
-
-est = ChRParamEst(
-    simulate_fn        = my_sim,
-    est_rule           = ChRParamEst.EstRule.LS,
-    param_sample_space = {
-        "k": ChRParamEst.ChR_Distr.uniform(0, 10),
-    },
-    target_sim_outputs = {
-        "output_1": 5.0,
-    }
-)
-```
-
-Run `ChRParamEst.info()` for full documentation.
+## More Info To Come Later
