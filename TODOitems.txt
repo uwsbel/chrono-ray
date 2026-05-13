@@ -17,3 +17,7 @@ Need to look into this more....
 @staticmethod
 def _execute_trial(simulate_fn, config):
     simulate_fn(config)
+
+======ITEM #3 
+
+in general, there might be a way to help a user utilize resources properly based on what chrono modules they are using and such 
