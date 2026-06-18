@@ -2,7 +2,7 @@
 name = "ChronoRay"
 version = "0.1.0"
 dependencies = [
-    "ray",
+    "ray>=2.34",
     "numpy",
     "bayesian-optimization==1.4.3",
 ]
