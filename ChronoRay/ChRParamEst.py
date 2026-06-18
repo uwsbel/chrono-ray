@@ -171,9 +171,10 @@ class ChRParamEst:
         #3. immediately run if FLAG_auto_run is True
         self.FLAG_auto_run = FLAG_auto_run
         self.chrono_ray = None
+        self.result_grid = None
         if FLAG_auto_run:
             self.chrono_ray = self._build_chrono_ray()
-            self.run() 
+            self.result_grid = self.run()
         
 
     def _validate_inputs(self) -> None:
@@ -308,10 +309,11 @@ class ChRParamEst:
             search_kwargs=self.search_alg_config,
         )
 
-    def run(self) -> None:
+    def run(self):
         if self.chrono_ray is None:
             raise ValueError("chrono_ray has not been built yet. Call _build_chrono_ray() first.")
 
         self.FLAG_auto_run = True
 
-        self.chrono_ray.run(FLAG_log_to_file=self.FLAG_log_to_file)
+        self.result_grid = self.chrono_ray.run(FLAG_log_to_file=self.FLAG_log_to_file)
+        return self.result_grid

@@ -10,11 +10,16 @@ TARGET SIM OUTPUTS:
     Energy Absorbed: 40.168956533686924
 '''
 
-from ChronoRay import ChRParamEst
-from Lander import Lander 
+from __future__ import annotations
+
+import os
+from pathlib import Path
+
+from ChronoRay import ChRParamEst, trials_as_dicts
+from Lander import Lander
 import pychrono.core as chrono
-import numpy as np
-import time
+
+_EX_DIR = Path(__file__).resolve().parent
 
 #1. PARAMETER SAMPLE SPACE
 param_sample_space = {
@@ -31,6 +36,9 @@ target_sim_outputs = {
 
 #3. SIMULATION WRAPPED IN FUNCTION
 def simulate_fn(config):
+
+    # Honeycomb / OBJ assets are loaded with paths relative to this example directory.
+    os.chdir(_EX_DIR)
 
     lander_location = chrono.ChVector3d(0, 0, 4)
     ground_position = chrono.ChVector3d(0, 0, 0) #where the ground plane is located 
@@ -81,10 +89,32 @@ def simulate_fn(config):
         "energy_absorbed": e_absorbed
     }
 
-#4. CHRONO RAY PARAMETER ESTIMATION INSTANCE 
-param_est = ChRParamEst(simulate_fn=simulate_fn, 
-                        est_rule=ChRParamEst.EstRule.LS, 
-                        param_sample_space=param_sample_space, 
-                        target_sim_outputs=target_sim_outputs,
-                        total_trials=50, 
-                        FLAG_log_to_file=True)
+
+def main() -> None:
+    import argparse
+
+    parser = argparse.ArgumentParser(description="Honeycomb lander parameter estimation (Ray Tune + PyChrono).")
+    parser.add_argument(
+        "--smoke",
+        action="store_true",
+        help="Run only 2 trials for quick validation on CI or headless nodes.",
+    )
+    args = parser.parse_args()
+    total_trials = 2 if args.smoke else 50
+    flag_log = False if args.smoke else True
+
+    param_est = ChRParamEst(
+        simulate_fn=simulate_fn,
+        est_rule=ChRParamEst.EstRule.LS,
+        param_sample_space=param_sample_space,
+        target_sim_outputs=target_sim_outputs,
+        total_trials=total_trials,
+        FLAG_log_to_file=flag_log,
+    )
+    if param_est.result_grid is not None:
+        trials = trials_as_dicts(param_est.result_grid)
+        print(f"Completed {len(trials)} trials; best objective={min(t['objective'] for t in trials):.6g}")
+
+
+if __name__ == "__main__":
+    main()

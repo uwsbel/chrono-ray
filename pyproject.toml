@@ -4,7 +4,7 @@ version = "0.1.0"
 dependencies = [
     "ray>=2.34",
     "numpy",
-    "bayesian-optimization==1.4.3",
+    "bayesian-optimization>=1.4.3,<2",
 ]
 
 [tool.setuptools.packages.find]
