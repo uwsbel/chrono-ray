@@ -24,7 +24,17 @@ DESCRIPTION: evaluates the honeycomb force
     - returns the honeycomb force
 '''
 import pychrono.core as chrono
-import pychrono.irrlicht as chronoirr
+
+# Optional Irrlicht import — not required for headless Ray workers / parameter estimation.
+try:
+    import pychrono.irrlicht as chronoirr  # noqa: F401
+except ImportError:
+    import types
+    import sys
+
+    sys.modules.setdefault("pychrono.irrlicht", types.ModuleType("pychrono.irrlicht"))
+    chronoirr = sys.modules["pychrono.irrlicht"]
+
 import math
 import sys
 import numpy as np
