@@ -7,6 +7,7 @@ dependencies:
   - python=3.12
   - projectchrono::pychrono
   - numpy
+  - pip
   - scipy
-  - fsspec 
-  - ray-tune
+  - fsspec
+  - cloudpickle
