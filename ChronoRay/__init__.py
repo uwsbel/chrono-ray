@@ -4,3 +4,4 @@ from ChronoRay.ChR_ChronoRay import ChR_ChronoRay
 from ChronoRay.ChRBayesOpt import ChRBayesOpt
 from ChronoRay.ChRDoE import ChRDoE
 from ChronoRay.ChROpt import ChROpt
+from ChronoRay.ChRBayesCalli import ChRBayesCalli

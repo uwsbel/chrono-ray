@@ -1,2 +1,4 @@
 ray
+ray[tune]
 numpy
+bayesian-optimization==1.4.3

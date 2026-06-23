@@ -1,5 +1,7 @@
 pyproject.toml
+ChronoRay/ChRBayesCalli.py
 ChronoRay/ChRBayesOpt.py
+ChronoRay/ChRCrashProtection.py
 ChronoRay/ChRDoE.py
 ChronoRay/ChROpt.py
 ChronoRay/ChRParamEst.py

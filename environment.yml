@@ -7,7 +7,11 @@ dependencies:
   - python=3.12
   - projectchrono::pychrono
   - numpy
-  - pip
   - scipy
-  - fsspec
-  - cloudpickle
+  - pip
+  - pip:
+      - matplotlib
+      - arviz
+      - pymc
+      - fsspec
+      - cloudpickle
