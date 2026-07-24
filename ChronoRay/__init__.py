@@ -1,7 +1,7 @@
 # ROCm-safe Ray defaults before any submodule imports ray.
 from ChronoRay.ChR_ROCmEnv import prepare_rocm_ray_env
 
-prepare_rocm_ray_env()
+#prepare_rocm_ray_env()
 
 from ChronoRay.ChRParamEst import ChRParamEst
 from ChronoRay.ChR_Config import ChR_Distr, ChR_SearchAlg
