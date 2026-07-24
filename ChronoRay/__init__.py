@@ -1,5 +1,5 @@
 # ROCm-safe Ray defaults before any submodule imports ray.
-from ChronoRay.rocm_ray_env import prepare_rocm_ray_env
+from ChronoRay.ChR_ROCmEnv import prepare_rocm_ray_env
 
 prepare_rocm_ray_env()
 
