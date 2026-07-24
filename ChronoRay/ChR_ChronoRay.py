@@ -138,6 +138,7 @@ class ChR_ChronoRay:
         self.search_algorithm      = search_algorithm
         self.search_kwargs         = search_kwargs or {}
         self.metric                = "objective"
+        self._search_alg           = None
 
    
 
@@ -173,6 +174,10 @@ class ChR_ChronoRay:
         elif alg == ChR_SearchAlg.BAYESOPT:
             from ray.tune.search.bayesopt import BayesOptSearch
             searcher = BayesOptSearch(**kw)
+
+        elif alg == ChR_SearchAlg.METROPOLIS:
+            from ChronoRay.ChRBayesCali import PriorMetropolisSearch
+            searcher = PriorMetropolisSearch(**kw)
 
         elif alg == ChR_SearchAlg.OPTUNA:
             from ray.tune.search.optuna import OptunaSearch
@@ -210,6 +215,25 @@ class ChR_ChronoRay:
                 searcher, max_concurrent=self.max_concurrent_trials
             )
 
+        return searcher
+
+    def get_searcher(self):
+        """
+        DESCRIPTION: 
+        Returns the underlying searcher after a run, unwrapping the
+        ConcurrencyLimiter when one was applied. Lets callers read searcher
+        state (e.g. an MCMC chain) once the run has completed.
+
+        ASSUMPTIONS: 
+        - run() has been called (otherwise the searcher has not been built yet).
+
+        INPUT(S):   None
+        RETURNS:    searcher (Ray Tune searcher object) or None if not built / GRID
+        THROWS:     None
+        """
+        searcher = self._search_alg
+        if isinstance(searcher, ConcurrencyLimiter):
+            return searcher.searcher
         return searcher
 
     def _trial(self, config):
@@ -290,7 +314,7 @@ class ChR_ChronoRay:
                 configure_logging=False
             )
 
-        built_search_alg = self._build_search_alg()
+        self._search_alg = self._build_search_alg()
 
         trainable = tune.with_resources(
             self._trial,
@@ -298,8 +322,8 @@ class ChR_ChronoRay:
         )
 
         tune_config_kwargs = {"num_samples": self.num_trials}
-        if built_search_alg is not None:
-            tune_config_kwargs["search_alg"] = built_search_alg
+        if self._search_alg is not None:
+            tune_config_kwargs["search_alg"] = self._search_alg
 
         tuner = tune.Tuner(
             trainable,

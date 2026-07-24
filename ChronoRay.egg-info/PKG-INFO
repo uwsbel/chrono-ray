@@ -2,4 +2,6 @@ Metadata-Version: 2.4
 Name: ChronoRay
 Version: 0.1.0
 Requires-Dist: ray
+Requires-Dist: ray[tune]
 Requires-Dist: numpy
+Requires-Dist: bayesian-optimization==1.4.3

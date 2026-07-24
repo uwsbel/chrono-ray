@@ -8,5 +8,10 @@ dependencies:
   - projectchrono::pychrono
   - numpy
   - scipy
-  - fsspec 
-  - ray-tune
+  - pip
+  - pip:
+      - matplotlib
+      - arviz
+      - pymc
+      - fsspec
+      - cloudpickle
