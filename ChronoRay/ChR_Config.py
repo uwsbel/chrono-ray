@@ -84,6 +84,7 @@ class ChR_SearchAlg(Enum):
     RANDOM    = (False, False)
     GRID      = (False, False)
     BAYESOPT  = (True,  True)
+    METROPOLIS = (True, True)
     OPTUNA    = (False, True)
     HYPEROPT  = (True,  True)
     BOHB      = (True,  True)
