@@ -2,11 +2,9 @@
 name = "ChronoRay"
 version = "0.1.0"
 dependencies = [
-    "ray",
-    "ray[tune]",
+    "ray[tune]>=2.34",
     "numpy",
     "bayesian-optimization==1.4.3",
 ]
-
 [tool.setuptools.packages.find]
 include = ["ChronoRay*"]
