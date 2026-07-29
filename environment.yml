@@ -1,17 +1,16 @@
-name: ChronoRay
+name: chrono-ray
+
 channels:
-  - projectchrono
+  - projectchrono     
   - conda-forge
-  - defaults
+
 dependencies:
   - python=3.12
-  - projectchrono::pychrono
-  - numpy
+  - projectchrono::pychrono #get pychrono from the projectchrono channel
+  - pymc>=5,<6
+  - arviz<1
   - scipy
+  - numpy
+  - matplotlib 
+  - cloudpickle
   - pip
-  - pip:
-      - matplotlib
-      - arviz
-      - pymc
-      - fsspec
-      - cloudpickle

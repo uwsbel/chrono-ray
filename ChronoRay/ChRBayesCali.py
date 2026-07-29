@@ -1,429 +1,827 @@
+"""
+PyMC-backed Bayesian calibration workflow for ChronoRay.
+
+The public API intentionally preserves the existing usage pattern:
+
+    param_prior_space = {
+        "mu_s": ChRBayesCali.ChR_Distr.uniform(0.5, 0.8),
+        "young_modulus": ChRBayesCali.ChR_Distr.loguniform(5e6, 8e6),
+    }
+
+    cal = ChRBayesCali(
+        simulate_fn=simulate_fn,
+        objective_fn=objective_fn,
+        param_prior_space=param_prior_space,
+        sigma=1.0,
+        total_samples=2000,
+        burn_in_frac=0.3,
+    )
+
+    posterior = cal.get_posterior()
+
+Internally, PyMC owns the priors, Metropolis sampler, chain state, tuning,
+acceptance/rejection, and posterior storage. The user's simulator and objective
+are exposed to PyMC through a black-box PyTensor Op.
+"""
+
+from __future__ import annotations
+
+from contextlib import contextmanager, redirect_stderr, redirect_stdout
+from dataclasses import dataclass
+from datetime import datetime
 import math
-import numpy as np
-from ray.tune.search import Searcher
-from collections.abc import Callable
+from pathlib import Path
+import sys
 import textwrap
+from collections.abc import Callable, Iterator
+from typing import Any, Literal
+import warnings
 
-from ChronoRay.ChR_ChronoRay import ChR_ChronoRay
-from ChronoRay.ChR_Config import ChR_Distr, ChR_SearchAlg
+import numpy as np
+import pymc as pm
+import pytensor.tensor as pt
+from pytensor.graph.basic import Apply
+from pytensor.graph.op import Op
 
-#crash detector: a protected sim returns the +inf crash sentinel on failure, and
-#is_crash() recognises it so a failed trial can be turned into a rejection.
-#NOTE: fix this import path to wherever crash_safe.py lives in the package.
-from crash_safe import is_crash
+from ChronoRay.ChRCrashProtection import is_crash
 
 
-class PriorMetropolisSearch(Searcher):
+PriorKind = Literal["uniform", "loguniform", "normal", "lognormal"]
 
-    # ==================================================================
-    # __init__ : set up the chain's memory
-    # the only new wrinkle is that the prior (param_space) may arrive
-    # later via set_search_properties, so we leave a slot for it
-    # ==================================================================
-    def __init__(self, param_space=None, metric="output", sigma=1.0, burn_in_frac=0.0, seed=0, **kw):
-        mode = "min"
-        super().__init__(metric=metric, mode=mode, **kw)
 
-        #1. parameter space = the priors for the parameters to be tuned 
-        self.param_space = param_space
+@dataclass(frozen=True)
+class _ChRPrior:
+    """
+    Deferred prior specification.
 
-        #2. chain's current position and its log-likelihood
-        self.current_x = None
-        self.current_loglik = None
+    ChR_Distr methods return these lightweight objects outside a PyMC model.
+    ChRBayesCali later converts them into named PyMC variables inside the
+    correct ``with pm.Model():`` context.
+    """
 
-        #3. scratchpad for proposals that are in flight (trial_id -> theta)
-        self.pending = {}
+    kind: PriorKind
+    parameters: dict[str, float]
+    FLAG_is_chr_distr: bool = True
 
-        #4. the chain itself (burn-in prefix approach). in the end, it will be the posterior 
-        self.samples = []
+    def build(self, name: str):
+        """Create the corresponding named PyMC variable."""
+        if not isinstance(name, str) or not name:
+            raise ValueError("Prior name must be a non-empty string")
 
-        #5. A private, seeded RNG (acceptance in the MCMC sampling is a coin flip, kept reproducible) 
-        self.rng = np.random.default_rng(seed)
+        if self.kind == "uniform":
+            return pm.Uniform(
+                name,
+                lower=self.parameters["lower"],
+                upper=self.parameters["upper"],
+            )
 
-        #6. noise model for negative log-likelihood calculation 
-        self.sigma = sigma
+        if self.kind == "normal":
+            return pm.Normal(
+                name,
+                mu=self.parameters["mu"],
+                sigma=self.parameters["sigma"],
+            )
 
-        #7. fraction of the earliest samples to discard as burn-in 
-        self.burn_in_frac = burn_in_frac
+        if self.kind == "lognormal":
+            return pm.LogNormal(
+                name,
+                mu=self.parameters["mu"],
+                sigma=self.parameters["sigma"],
+            )
 
-    # ==================================================================
-    # set_search_properties : Tune hands us the param_space (the priors)
-    # through here, so we capture it if it wasn't passed in directly
-    # ==================================================================
-    def set_search_properties(self, metric, mode, config, **spec):
+        if self.kind == "loguniform":
+            lower = self.parameters["lower"]
+            upper = self.parameters["upper"]
 
-        #1. capture the prior space if we don't already have it 
-        if self.param_space is None:
-            self.param_space = config
+            # PyMC does not need a custom log-uniform implementation. Sampling
+            # uniformly in log(x), then exponentiating, gives p(x) proportional
+            # to 1/x over [lower, upper].
+            log_rv = pm.Uniform(
+                f"__chr_log_{name}",
+                lower=math.log(lower),
+                upper=math.log(upper),
+            )
+            return pm.Deterministic(name, pt.exp(log_rv))
 
-        #2. tell Tune we took ownership of the search space 
-        return True
+        raise ValueError(f"Unsupported prior kind: {self.kind!r}")
 
-    # ------------------------------------------------------------------
-    # helper: draw ONE theta straight from the prior
-    # Every Domain (tune.uniform, tune.randn, ...) knows how to .sample()
-    # itself; plain constants are passed through untouched
-    # ------------------------------------------------------------------
-    def _sample_prior(self):
 
-        #note: compact dict generation
-        return {key: (distribution.sample() if hasattr(distribution, "sample") else distribution) for key, distribution in self.param_space.items()}
+class ChR_Distr:
+    """ChronoRay's stable, user-facing prior-distribution factory."""
 
-    # ==================================================================
-    # suggest : the ASK half. Propose a candidate -- here the candidate
-    # IS a fresh draw from the prior (that's the independence sampler)
-    # ==================================================================
-    def suggest(self, trial_id):
-
-        #1. propose new theta by sampling from the prior distr 
-        x_prop = self._sample_prior()
-
-        #2. log the proposal in the scratchpad 
-        self.pending[trial_id] = x_prop
-
-        #3. return the proposal to Tune to actually run the simulator on it
-        return x_prop
-
-    # ==================================================================
-    # on_trial_complete : the TELL half. The simulator finished, so the
-    # Metropolis accept/reject happens here -- now just a likelihood ratio
-    # ==================================================================
-    def on_trial_complete(self, trial_id, result=None, error=False):
-
-        #1. recover theta value for trial 
-        x_prop = self.pending.pop(trial_id, None)
-
-        #1a. unknown trial_id -> nothing to score, nothing to record 
-        if x_prop is None:
-            return
-
-        #2. a FAILED trial (sim crash sentinel, Ray error, or missing metric) is a
-        #   plain REJECT: stay put and re-record the current state. a crash is the
-        #   ABSENCE of information about this point, NOT evidence it fits badly --
-        #   so we never run it through the likelihood (it can't be accepted, and it
-        #   can't distort the posterior with a fake misfit).
-        failed = (
-            error
-            or result is None
-            or self.metric not in result
-            or is_crash(result[self.metric])
+    @staticmethod
+    def uniform(lower: float, upper: float) -> _ChRPrior:
+        lower, upper = ChR_Distr._validate_bounds(
+            lower,
+            upper,
+            positive=False,
+            label="uniform",
+        )
+        return _ChRPrior(
+            kind="uniform",
+            parameters={"lower": lower, "upper": upper},
         )
 
-        if failed:
-            #2a. a reject only means something once we HAVE a current state. if the
-            #    very first step failed there's nothing to fall back to, so we skip
-            #    it and wait for a usable first sample.
-            if self.current_x is not None:
-                self.samples.append(self.current_x)
-            return
+    @staticmethod
+    def loguniform(lower: float, upper: float) -> _ChRPrior:
+        lower, upper = ChR_Distr._validate_bounds(
+            lower,
+            upper,
+            positive=True,
+            label="loguniform",
+        )
+        return _ChRPrior(
+            kind="loguniform",
+            parameters={"lower": lower, "upper": upper},
+        )
 
-        #3. turn the user's sim-to-real data mismatch  into a log-likelihood
-        #user reports misfit (e.g. sum of squared errors), lower = better fit
-        #under Gaussian noise: loglik = -misfit / (2 * sigma^2)
-        misfit_new = result[self.metric]
-        loglik_new = -misfit_new / (2 * self.sigma ** 2)
+    @staticmethod
+    def normal(mu: float, sigma: float) -> _ChRPrior:
+        mu = ChR_Distr._finite_float(mu, "mu")
+        sigma = ChR_Distr._positive_float(sigma, "sigma")
+        return _ChRPrior(
+            kind="normal",
+            parameters={"mu": mu, "sigma": sigma},
+        )
 
-        #APPENDING TO THE CHAIN: 
+    @staticmethod
+    def lognormal(mu: float, sigma: float) -> _ChRPrior:
+        mu = ChR_Distr._finite_float(mu, "mu")
+        sigma = ChR_Distr._positive_float(sigma, "sigma")
+        return _ChRPrior(
+            kind="lognormal",
+            parameters={"mu": mu, "sigma": sigma},
+        )
 
-        #4a. if this is first step of the chain, there nothing to compare to, so just adopt this point
-        if self.current_x is None:
-            self.current_x, self.current_loglik = x_prop, loglik_new
+    @staticmethod
+    def info() -> None:
+        print(
+            textwrap.dedent(
+                """
+                ChR_Distr prior factories
+                -------------------------
+                uniform(lower, upper)
+                    Uniform prior on the stated interval.
 
-        #4b. accept/reject
-        else:
-            log_alpha = loglik_new - self.current_loglik
-            if math.log(self.rng.uniform()) < log_alpha:
-                self.current_x, self.current_loglik = x_prop, loglik_new
-            # else: reject -> stay put, current_x unchanged
+                loguniform(lower, upper)
+                    Log-uniform prior on a strictly positive interval.
 
-        #5. append the sample to the chain (building the posterior)
-        self.samples.append(self.current_x)
+                normal(mu, sigma)
+                    Normal prior with mean mu and standard deviation sigma.
 
-    # ==================================================================
-    # get_posterior : return the chain with the burn-in prefix discarded
-    # (the early "travel" samples before the chain settled)
-    # ==================================================================
-    def get_posterior(self):
+                lognormal(mu, sigma)
+                    Log-normal prior where log(parameter) ~ Normal(mu, sigma).
 
-        #1. how many of the earliest samples to drop 
-        start = int(self.burn_in_frac * len(self.samples))
+                Example
+                -------
+                priors = {
+                    "mu_s": ChRBayesCali.ChR_Distr.uniform(0.5, 0.8),
+                    "E": ChRBayesCali.ChR_Distr.loguniform(5e6, 8e6),
+                }
+                """
+            ).strip()
+        )
 
-        #2. return everything after the burn-in prefix 
-        return self.samples[start:]
+    @staticmethod
+    def _format_distr(prior: _ChRPrior) -> str:
+        args = ", ".join(
+            f"{key}={value:g}" for key, value in prior.parameters.items()
+        )
+        return f"{prior.kind}({args})"
+
+    @staticmethod
+    def _finite_float(value: Any, name: str) -> float:
+        if isinstance(value, bool):
+            raise TypeError(f"{name} must be numeric, not bool")
+
+        try:
+            result = float(value)
+        except (TypeError, ValueError) as exc:
+            raise TypeError(f"{name} must be numeric, got {value!r}") from exc
+
+        if not np.isfinite(result):
+            raise ValueError(f"{name} must be finite, got {value!r}")
+
+        return result
+
+    @staticmethod
+    def _positive_float(value: Any, name: str) -> float:
+        result = ChR_Distr._finite_float(value, name)
+        if result <= 0.0:
+            raise ValueError(f"{name} must be positive, got {value!r}")
+        return result
+
+    @staticmethod
+    def _validate_bounds(
+        lower: Any,
+        upper: Any,
+        *,
+        positive: bool,
+        label: str,
+    ) -> tuple[float, float]:
+        lower_f = ChR_Distr._finite_float(lower, "lower")
+        upper_f = ChR_Distr._finite_float(upper, "upper")
+
+        if positive and lower_f <= 0.0:
+            raise ValueError(
+                f"{label} requires a strictly positive lower bound; "
+                f"got {lower!r}"
+            )
+
+        if lower_f >= upper_f:
+            raise ValueError(
+                f"{label} requires lower < upper; "
+                f"got lower={lower_f!r}, upper={upper_f!r}"
+            )
+
+        return lower_f, upper_f
+
+
+class _SimulationLogLikelihoodOp(Op):
+    """
+    PyTensor bridge for an arbitrary Python simulation and objective function.
+
+    Inputs are scalar parameter values in a stable order. The output is one
+    scalar log-likelihood:
+
+        log_likelihood = -misfit / (2 * sigma**2)
+
+    A crash-protected Bayesian-calibration workflow must use mode="min":
+    +inf is recognized as the crash sentinel and mapped to -inf log likelihood.
+    NaN and -inf are treated as invalid objective outputs rather than crashes.
+
+    The Op deliberately exposes no gradient. ChRBayesCali therefore selects
+    PyMC's established Metropolis step method rather than NUTS.
+    """
+
+    __props__ = ("parameter_names", "sigma")
+
+    def __init__(
+        self,
+        *,
+        parameter_names: tuple[str, ...],
+        simulate_fn: Callable[[dict[str, float]], Any],
+        objective_fn: Callable[[Any], float],
+        sigma: float,
+    ) -> None:
+        self.parameter_names = parameter_names
+        self.simulate_fn = simulate_fn
+        self.objective_fn = objective_fn
+        self.sigma = float(sigma)
+
+    def make_node(self, *theta) -> Apply:
+        if len(theta) != len(self.parameter_names):
+            raise ValueError(
+                f"Expected {len(self.parameter_names)} parameters, "
+                f"received {len(theta)}"
+            )
+
+        inputs = [pt.as_tensor_variable(value) for value in theta]
+
+        for value in inputs:
+            if value.ndim != 0:
+                raise TypeError(
+                    "ChRBayesCali currently supports scalar calibration "
+                    "parameters only"
+                )
+
+        return Apply(self, inputs, [pt.dscalar()])
+
+    def perform(self, node, inputs, outputs) -> None:
+        del node
+
+        try:
+            config = {
+                name: float(value)
+                for name, value in zip(
+                    self.parameter_names,
+                    inputs,
+                    strict=True,
+                )
+            }
+
+            simulation_output = self.simulate_fn(config)
+            misfit = float(self.objective_fn(simulation_output))
+
+            # Bayesian calibration receives a data misfit, so lower is better.
+            # ChRCrashProtection must therefore be configured with mode="min",
+            # whose crash sentinel is +inf. Only that specific infinity means
+            # "simulation failed" and should become a normal MCMC rejection.
+            if is_crash(misfit, mode="min"):
+                log_likelihood = -np.inf
+            elif not np.isfinite(misfit):
+                raise ValueError(
+                    "objective_fn returned an invalid non-finite misfit: "
+                    f"{misfit!r}. For Bayesian calibration, protected crashes "
+                    "must use mode='min' so the sentinel is +inf."
+                )
+            else:
+                log_likelihood = -misfit / (2.0 * self.sigma**2)
+
+        except BaseException as exc:
+            # A failed simulator call represents an inadmissible proposal for
+            # the sampler. Do not terminate the full calibration run.
+            print(
+                "[ChRBayesCali] simulation/objective failure; "
+                f"proposal rejected. Error: {exc}",
+                file=sys.stderr,
+                flush=True,
+            )
+            log_likelihood = -np.inf
+
+        outputs[0][0] = np.asarray(log_likelihood, dtype=np.float64)
+
+    def infer_shape(self, fgraph, node, input_shapes):
+        del fgraph, node, input_shapes
+        return [()]
 
 
 class ChRBayesCali:
+    """
+    Bayesian calibration façade backed by PyMC.
+
+    The public constructor intentionally mirrors the former Ray/Tune-backed
+    implementation. ``simulate_fn`` receives a parameter dictionary and
+    ``objective_fn`` returns a scalar data misfit. PyMC supplies the priors,
+    Metropolis implementation, tuning, chain storage, and posterior trace.
+    """
+
+    ChR_Distr = ChR_Distr
 
     @staticmethod
     def info() -> None:
         print("========================================================")
-        print("ChRBayesCali - ChronoRay (PyChrono + Ray) Bayesian Calibration Workflow")
+        print("ChRBayesCali - PyMC-backed Bayesian Calibration Workflow")
         print("========================================================")
-        print(textwrap.dedent("""
-            DESCRIPTION:
-                ChRBayesCali calibrates a PyChrono simulation against observed data.
-                Unlike ChRBayesOpt, it does NOT return a single best parameter set --
-                it returns a POSTERIOR DISTRIBUTION over the parameters: the values that
-                make the simulation match the data, together with their uncertainty.
+        print(
+            textwrap.dedent(
+                """
+                DESCRIPTION
+                    Calibrates an arbitrary simulation against observed data and
+                    returns a posterior distribution over its parameters.
 
-                The search backend is an MCMC sampler (prior-proposal Metropolis), not
-                an optimizer. Each trial = one simulator run = one step in the chain.
+                    The public workflow remains:
 
-                Two ideas distinguish this from ChRBayesOpt:
-                  - param_prior_space defines PRIOR distributions, not just a search range.
-                    The sampler draws its candidate parameters straight from these priors.
-                  - there IS observed data to match. Your objective_fn scores how far a
-                    simulation is from that data (returning a misfit, lower = better).
+                        config -> simulate_fn -> output -> objective_fn -> misfit
 
-            --------------------------------------------------------
-            CONSTRUCTOR ARGUMENTS:
-            --------------------------------------------------------
+                    Internally, PyMC evaluates:
 
-                simulate_fn (Callable) [REQUIRED]
-                    A PyChrono simulation function.
-                    INPUT:   config (dict) -- parameter names and their sampled values.
-                    RETURNS: output (dict) -- simulation output values.
-                    NOTE:    no visualization (e.g. Irrlicht, VSG) should take place.
+                        log posterior = log prior - misfit / (2 * sigma**2)
 
-                objective_fn (Callable) [REQUIRED]
-                    Scores how far a single simulation run is from your observed data.
-                    INPUT:   output (dict) -- return value of simulate_fn.
-                    RETURNS: misfit (float) -- lower = better fit.
-                    IMPORTANT: report DATA MISFIT ONLY. Do not add any prior/penalty term.
-                               The prior is already applied by drawing candidates from
-                               param_prior_space; adding it here would double-count it.
-                    NOTE:    close over your observed data inside the function.
-                    Example: observed = {"settling_time": 1.42}
-                             objective_fn = lambda output: (
-                                 (output["settling_time"] - observed["settling_time"]) ** 2
-                             )
+                    PyMC's Metropolis implementation owns proposal generation,
+                    tuning, acceptance/rejection, chain state, and sample storage.
 
-                param_prior_space (dict[str, ChR_Distr]) [REQUIRED]
-                    Parameters to calibrate and their PRIOR distributions.
-                    Keys   : parameter names (must match keys expected by simulate_fn).
-                    Values : ChR_Distr distributions -- treated as priors.
-                    NOTE:    run ChRBayesCali.ChR_Distr.info() for available distributions.
+                REQUIRED ARGUMENTS
+                    simulate_fn(config)
+                        Runs one simulation. ``config`` is a dictionary mapping
+                        parameter names to scalar numerical values.
 
-                sigma (float) [OPTIONAL, default: 1.0]
-                    Assumed noise / scatter between simulation and data. It converts the
-                    misfit into a likelihood:   loglik = -misfit / (2 * sigma**2).
-                    Larger sigma -> more tolerant of mismatch (wider posterior).
-                    Set it to reflect your measurement noise. It can later be promoted to
-                    a parameter and inferred too, but a fixed value is fine to start.
+                    objective_fn(output)
+                        Compares simulation output with observations and returns
+                        one finite scalar data misfit. Lower is better. Do not add
+                        prior penalties here.
 
-                total_samples (int) [OPTIONAL, default: 2000]
-                    Number of MCMC steps (= number of simulator runs). Mapping a full
-                    posterior needs many more samples than optimization needs trials.
+                    param_prior_space
+                        Dictionary of parameter names to
+                        ``ChRBayesCali.ChR_Distr`` prior specifications.
 
-                burn_in_frac (float) [OPTIONAL, default: 0.3]
-                    Fraction of the earliest samples to discard. The chain starts at an
-                    arbitrary point and needs time to settle into the region the data
-                    supports; those early "travel" samples would bias the result.
+                OPTIONAL ARGUMENTS
+                    sigma=1.0
+                        Converts data misfit to log likelihood using
+                        -misfit / (2*sigma**2).
 
-                FLAG_log_to_file (bool) [OPTIONAL, default: False]
-                    If True, Ray's console output is redirected to a timestamped
-                    .txt file in the current working directory. User prints are also
-                    redirected to .txt file. Default keeps all output in the console.
+                    total_samples=2000
+                        Total per-chain sampling budget, including tuning.
 
-                FLAG_auto_run (bool) [OPTIONAL, default: True]
-                    Controls the operating mode. See OPERATING MODES below.
+                    burn_in_frac=0.3
+                        Fraction of total_samples used for PyMC tuning and then
+                        discarded.
 
-                NOTE ON CONCURRENCY:
-                    A single MCMC chain is strictly sequential -- each step depends on the
-                    previous one's result -- so trials run ONE AT A TIME. There is no
-                    max_concurrent_trials knob here; it is fixed to 1 internally.
-                    (Parallelism would require multiple chains, which this class does not
-                    yet expose.)
+                    chains=1
+                        Number of independent PyMC chains.
 
-            --------------------------------------------------------
-            OPERATING MODES:
-            --------------------------------------------------------
+                    cores=1
+                        Number of processes used for chains. Keep at 1 when the
+                        simulator is not safe to execute concurrently.
 
-                MODE 1 -- FLAG_auto_run=True (default)
-                    The calibration runs immediately on construction.
-                    No further configuration is possible.
+                    random_seed=0
+                        Sampling seed.
 
-                    Example:
-                        cal = ChRBayesCali(
-                            simulate_fn  = my_sim,
-                            objective_fn = lambda output: (
-                                (output["settling_time"] - 1.42) ** 2
-                            ),
-                            param_prior_space = {
-                                "k": ChRBayesCali.ChR_Distr.uniform(0, 10),
-                                "m": ChRBayesCali.ChR_Distr.loguniform(1e-2, 1e2),
-                            },
-                            sigma = 0.05,
-                        )
+                    FLAG_log_to_file=False
+                        Redirect console output to a timestamped text file.
 
-                MODE 2 -- FLAG_auto_run=False
-                    Construction stops after validation and config report.
-                    The user can then configure optional settings via the
-                    setters listed below before manually building and running.
+                    FLAG_auto_run=True
+                        Build and run immediately during construction.
 
-                    Example:
-                        cal = ChRBayesCali(
-                            simulate_fn       = my_sim,
-                            objective_fn      = my_objective,
-                            param_prior_space = {...},
-                            sigma             = 0.05,
-                            FLAG_auto_run     = False
-                        )
-                        cal.set_resources_per_trial(cpu=4, gpu=0)
-                        cal.set_FLAG_log_to_file(True)
-                        cal._build_backend()
-                        cal.run()
+                RETURN VALUE
+                    get_posterior() returns:
 
-            --------------------------------------------------------
-            OPTIONAL SETTERS (MODE 2 only):
-            --------------------------------------------------------
+                        list[dict[str, float]]
 
-                set_resources_per_trial(cpu: int, gpu: int)
-                    Set the CPU/GPU resources allocated per trial.
-                    Default: cpu=1, gpu=0
+                    This preserves compatibility with:
 
-                set_FLAG_log_to_file(flag: bool)
-                    Toggle whether Ray output is redirected to a file. Default: False
-        """))
+                        pd.DataFrame(cal.get_posterior())
+                """
+            )
+        )
         print("========================================================")
-
-    ChR_Distr = ChR_Distr
 
     def __init__(
-                self,
-                simulate_fn: Callable,
-                objective_fn: Callable,
-                param_prior_space: dict[str, ChR_Distr],
-                sigma: float = 1.0,
-                total_samples: int = 2000,
-                burn_in_frac: float = 0.3,
-                FLAG_log_to_file: bool = False,
-                FLAG_auto_run: bool = True) -> None:
-
-        #1. mandatory parameters
+        self,
+        simulate_fn: Callable,
+        objective_fn: Callable,
+        param_prior_space: dict[str, _ChRPrior],
+        sigma: float = 1.0,
+        total_samples: int = 2000,
+        burn_in_frac: float = 0.3,
+        FLAG_log_to_file: bool = False,
+        FLAG_auto_run: bool = True,
+        *,
+        chains: int = 1,
+        cores: int = 1,
+        random_seed: int | None = 0,
+        progressbar: bool = True,
+    ) -> None:
         self.simulate_fn = simulate_fn
         self.objective_fn = objective_fn
         self.param_prior_space = param_prior_space
 
-        #2. calibration settings
         self.sigma = sigma
         self.total_samples = total_samples
         self.burn_in_frac = burn_in_frac
+        self.chains = chains
+        self.cores = cores
+        self.random_seed = random_seed
+        self.progressbar = progressbar
 
-        #3. single-chain MCMC is sequential -> exactly one trial at a time
-        self.max_concurrent_trials = 1
-
-        #4. optional parameters
-        self.resources_per_trial = {"cpu": 1, "gpu": 1}
         self.FLAG_log_to_file = FLAG_log_to_file
+        self.FLAG_auto_run = FLAG_auto_run
+
+        #TODO probably important when we scale up to cluster 
+        self.resources_per_trial = {"cpu": 1, "gpu": 0}
+
+        self.model: pm.Model | None = None          #PyMC engine 
+        self.idata: Any | None = None               #the ArviZ obj (ret by PyMC sampling) that holds all the important info and such
+        self.log_file_path: Path | None = None
+
+        self._parameter_names = tuple(param_prior_space.keys())
+        self._parameter_variables: dict[str, Any] = {}
+        self._loglike_op: _SimulationLogLikelihoodOp | None = None
+        self._has_run = False
 
         self._validate_inputs()
         self._report_config()
 
-        #5. immediately run if FLAG_auto_run is True
-        self.FLAG_auto_run = FLAG_auto_run
-        self.backend = None
         if FLAG_auto_run:
-            self.backend = self._build_backend()
+            self._build_model()
             self.run()
 
     def _validate_inputs(self) -> None:
-
-        print("************************************************************")
-        print("Validating inputs...")
-        print("run ChRBayesCali.info() for information on how to use this workflow.")
-        print("************************************************************")
-
-        #1. simulate_fn check
         if not callable(self.simulate_fn):
-            raise ValueError("simulate_fn must be callable")
+            raise TypeError("simulate_fn must be callable")
 
-        #2. objective_fn check
         if not callable(self.objective_fn):
-            raise ValueError("objective_fn must be callable")
+            raise TypeError("objective_fn must be callable")
 
-        #3. parameter configuration checks
         if not isinstance(self.param_prior_space, dict):
             raise TypeError("param_prior_space must be a dict")
 
-        if not all(isinstance(k, str) for k in self.param_prior_space.keys()):
-            raise TypeError("param_prior_space keys must all be strings")
+        if not self.param_prior_space:
+            raise ValueError("param_prior_space cannot be empty")
 
-        if not all(getattr(v, "FLAG_is_chr_distr", False) for v in self.param_prior_space.values()):
-            raise TypeError("param_prior_space values must all be ChR_Distr distributions. Use ChRBayesCali.ChR_Distr.info() for available options and additional info.")
+        if not all(
+            isinstance(name, str) and name
+            for name in self.param_prior_space
+        ):
+            raise TypeError(
+                "param_prior_space keys must be non-empty strings"
+            )
 
-        #4. sigma check
-        if not isinstance(self.sigma, (int, float)) or self.sigma <= 0:
-            raise ValueError(f"sigma must be a positive number, got {self.sigma!r}")
+        if not all(
+            isinstance(prior, _ChRPrior)
+            and prior.FLAG_is_chr_distr
+            for prior in self.param_prior_space.values()
+        ):
+            raise TypeError(
+                "param_prior_space values must be created with "
+                "ChRBayesCali.ChR_Distr"
+            )
 
-        #5. total_samples check
-        if not isinstance(self.total_samples, int) or self.total_samples <= 0:
-            raise ValueError(f"total_samples must be a positive integer, got {self.total_samples!r}")
+        self.sigma = ChR_Distr._positive_float(self.sigma, "sigma")
 
-        #6. burn_in_frac check
-        if not isinstance(self.burn_in_frac, (int, float)) or not (0.0 <= self.burn_in_frac < 1.0):
-            raise ValueError(f"burn_in_frac must be in [0.0, 1.0), got {self.burn_in_frac!r}")
+        if (
+            isinstance(self.total_samples, bool)
+            or not isinstance(self.total_samples, int)
+            or self.total_samples <= 0
+        ):
+            raise ValueError(
+                "total_samples must be a positive integer, "
+                f"got {self.total_samples!r}"
+            )
+
+        if (
+            isinstance(self.burn_in_frac, bool)
+            or not isinstance(self.burn_in_frac, (int, float))
+            or not 0.0 <= float(self.burn_in_frac) < 1.0
+        ):
+            raise ValueError(
+                "burn_in_frac must be in [0.0, 1.0), "
+                f"got {self.burn_in_frac!r}"
+            )
+
+        self.burn_in_frac = float(self.burn_in_frac)
+
+        if (
+            isinstance(self.chains, bool)
+            or not isinstance(self.chains, int)
+            or self.chains <= 0
+        ):
+            raise ValueError(
+                f"chains must be a positive integer, got {self.chains!r}"
+            )
+
+        if (
+            isinstance(self.cores, bool)
+            or not isinstance(self.cores, int)
+            or self.cores <= 0
+        ):
+            raise ValueError(
+                f"cores must be a positive integer, got {self.cores!r}"
+            )
+
+        if self.random_seed is not None and (
+            isinstance(self.random_seed, bool)
+            or not isinstance(self.random_seed, int)
+        ):
+            raise TypeError(
+                "random_seed must be an integer or None, "
+                f"got {self.random_seed!r}"
+            )
+
+        if not isinstance(self.FLAG_log_to_file, bool):
+            raise TypeError("FLAG_log_to_file must be bool")
+
+        if not isinstance(self.FLAG_auto_run, bool):
+            raise TypeError("FLAG_auto_run must be bool")
+
+        if not isinstance(self.progressbar, bool):
+            raise TypeError("progressbar must be bool")
+
+        if self._draws < 1:
+            raise ValueError(
+                "burn_in_frac leaves no retained posterior draws. "
+                "Increase total_samples or reduce burn_in_frac."
+            )
+
+    @property
+    def _tune(self) -> int:
+        return int(self.total_samples * self.burn_in_frac)
+
+    @property
+    def _draws(self) -> int:
+        return self.total_samples - self._tune
 
     def _report_config(self) -> None:
-
         print("************************************************************")
-        print("========================================================")
-        print("ChRBayesCali (\"ChronoRay Bayesian Calibration Workflow\") configuration:")
-        print("========================================================")
-        print(f"  1. simulate_fn        : {self.simulate_fn.__name__}")
-        print(f"  2. objective_fn       : {self.objective_fn.__name__}")
-        print(f"  3. param_prior_space  :")
+        print('ChRBayesCali ("PyMC Bayesian Calibration Workflow")')
+        print("************************************************************")
+        print(f"  simulate_fn       : {self._callable_name(self.simulate_fn)}")
+        print(f"  objective_fn      : {self._callable_name(self.objective_fn)}")
+        print("  param_prior_space :")
 
-        for name, distr in self.param_prior_space.items():
-            print(f"       {name} : {ChR_Distr._format_distr(distr)}")
+        for name, prior in self.param_prior_space.items():
+            print(f"    {name}: {ChR_Distr._format_distr(prior)}")
 
-        print(f"  4. sigma              : {self.sigma}")
-        print(f"  5. total_samples      : {self.total_samples}")
-        print(f"  6. burn_in_frac       : {self.burn_in_frac}")
-        print(f"  7. search_algorithm   : METROPOLIS (fixed)")
-        print(f"  8. max_concurrent     : 1 (single chain, sequential)")
-        print(f"  9. FLAG_log_to_file        : {self.FLAG_log_to_file}")
+        print(f"  sigma             : {self.sigma}")
+        print(f"  total_samples     : {self.total_samples}")
+        print(f"  tune/burn-in      : {self._tune}")
+        print(f"  retained draws    : {self._draws}")
+        print(f"  chains            : {self.chains}")
+        print(f"  cores             : {self.cores}")
+        print("  sampler           : PyMC Metropolis")
+        print(f"  FLAG_log_to_file  : {self.FLAG_log_to_file}")
         print("************************************************************")
 
-    #<3 METHODS IN USER INTERFACE
+    @staticmethod
+    def _callable_name(fn: Callable) -> str:
+        return getattr(fn, "__name__", fn.__class__.__name__)
+
     def set_resources_per_trial(self, cpu: int, gpu: int) -> None:
-        if self.FLAG_auto_run:
-            raise ValueError("Cannot set resources_per_trial after (auto-)run has started")
+        """
+        Compatibility method retained from the Ray implementation.
+
+        These values are recorded but are not used by PyMC. Use ``chains`` and
+        ``cores`` to control chain-level execution.
+        """
+        if self._has_run:
+            raise ValueError(
+                "Cannot change resources after sampling has started"
+            )
+
+        if (
+            isinstance(cpu, bool)
+            or not isinstance(cpu, int)
+            or cpu <= 0
+        ):
+            raise ValueError("cpu must be a positive integer")
+
+        if (
+            isinstance(gpu, bool)
+            or not isinstance(gpu, int)
+            or gpu < 0
+        ):
+            raise ValueError("gpu must be a non-negative integer")
+
         self.resources_per_trial = {"cpu": cpu, "gpu": gpu}
 
-    def set_FLAG_log_to_file(self, flag: bool) -> None:
-        if self.FLAG_auto_run:
-            raise ValueError("Cannot set FLAG_log_to_file after (auto-)run has started")
-        self.FLAG_log_to_file = flag
-
-    def _build_backend(self) -> ChR_ChronoRay:
-
-        if self.backend is not None and self.FLAG_auto_run:
-            raise ValueError("Cannot rebuild since backend has already been built and (auto-)run has started.")
-
-        return ChR_ChronoRay(
-            simulate_fn=self.simulate_fn,
-            objective_fn=self.objective_fn,
-            param_space=self.param_prior_space,
-            resources_per_trial=self.resources_per_trial,
-            num_trials=self.total_samples,
-            max_concurrent_trials=self.max_concurrent_trials,
-            mode="min",                              # always minimize misfit / NLL
-            search_algorithm=ChR_SearchAlg.METROPOLIS,
-            search_kwargs={
-                "sigma": self.sigma,                 # misfit -> likelihood conversion
-                "burn_in_frac": self.burn_in_frac,   # discard the chain's early travel
-            },
+        warnings.warn(
+            "set_resources_per_trial() is retained only for API "
+            "compatibility. The PyMC model does not allocate Ray trials.",
+            RuntimeWarning,
+            stacklevel=2,
         )
 
+    def set_FLAG_log_to_file(self, flag: bool) -> None:
+        if self._has_run:
+            raise ValueError(
+                "Cannot change FLAG_log_to_file after sampling has started"
+            )
+
+        if not isinstance(flag, bool):
+            raise TypeError("flag must be bool")
+
+        self.FLAG_log_to_file = flag
+
+    def _build_model(self) -> pm.Model:
+        """
+        Build and retain the PyMC model.
+
+        Calling this method repeatedly before sampling is safe; the existing
+        model is returned.
+        """
+        if self.model is not None:
+            return self.model
+
+        #0. set up the wrapper around the black box simulation (deterministic mapping from params to output)
+        self._loglike_op = _SimulationLogLikelihoodOp(
+            parameter_names=self._parameter_names,
+            simulate_fn=self.simulate_fn,
+            objective_fn=self.objective_fn,
+            sigma=self.sigma,
+        )
+
+        with pm.Model() as model:
+            #1. priors 
+            self._parameter_variables = {
+                name: prior.build(name)
+                for name, prior in self.param_prior_space.items()
+            }
+
+            #2. turn the black box simulation into a symbolic expression PyMC can work with 
+            ordered_variables = [
+                self._parameter_variables[name]
+                for name in self._parameter_names
+            ]
+
+
+            log_likelihood = self._loglike_op(*ordered_variables)
+
+            #3. log likelihood 
+            pm.Potential("chr_simulation_loglikelihood", log_likelihood)
+
+        self.model = model
+        return model
+
     def run(self) -> None:
-        if self.backend is None:
-            raise ValueError("backend has not been built yet. Call _build_backend() first.")
+        if self._has_run:
+            raise ValueError(
+                "Calibration has already run. Construct a new "
+                "ChRBayesCali instance for a fresh posterior."
+            )
+
+        if self.model is None:
+            self._build_model()
+
+        assert self.model is not None
 
         self.FLAG_auto_run = True
-        self.backend.run(FLAG_log_to_file=self.FLAG_log_to_file)
+        self._has_run = True
 
-    def get_posterior(self):
-        if self.backend is None:
-            raise ValueError("backend has not been built/run yet. Call run() first.")
-        return self.backend.get_searcher().get_posterior()
+        with self._output_context():
+            print(
+                "[ChRBayesCali] Starting PyMC calibration: "
+                f"{self.chains} chain(s), "
+                f"{self._tune} tune step(s), "
+                f"{self._draws} retained draw(s) per chain.",
+                flush=True,
+            )
+
+            with self.model:
+                # The simulation likelihood is an opaque Python operation with
+                # no derivative. Explicit Metropolis selection prevents PyMC
+                # from attempting gradient-based NUTS.
+                step = pm.Metropolis()
+
+                self.idata = pm.sample(
+                    draws=self._draws,
+                    tune=self._tune,
+                    chains=self.chains,
+                    cores=min(self.cores, self.chains),
+                    step=step,
+                    random_seed=self.random_seed,
+                    return_inferencedata=True,
+                    discard_tuned_samples=True,
+                    progressbar=self.progressbar,
+                    compute_convergence_checks=self.chains > 1,
+                    var_names=list(self._parameter_names),
+                )
+
+            print(
+                "[ChRBayesCali] Calibration complete. "
+                f"Retained posterior samples: "
+                f"{self._draws * self.chains}",
+                flush=True,
+            )
+
+    @contextmanager
+    def _output_context(self) -> Iterator[None]:
+        if not self.FLAG_log_to_file:
+            yield
+            return
+
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        self.log_file_path = (
+            Path.cwd() / f"ChRBayesCali_{timestamp}.txt"
+        )
+
+        with self.log_file_path.open(
+            "w",
+            encoding="utf-8",
+            buffering=1,
+        ) as stream:
+            with redirect_stdout(stream), redirect_stderr(stream):
+                yield
+
+        print(
+            f"[ChRBayesCali] Log written to {self.log_file_path}",
+            flush=True,
+        )
+
+    def get_posterior(self) -> list[dict[str, float]]:
+        """
+        Return flattened posterior draws in the legacy ChronoRay format.
+
+        Output order is chain-major, then draw-major.
+        """
+        if self.idata is None:
+            raise ValueError(
+                "Calibration has not run. Call run() first."
+            )
+
+        posterior_group = self.idata.posterior
+        flattened: dict[str, np.ndarray] = {}
+
+        for name in self._parameter_names:
+            try:
+                values = np.asarray(posterior_group[name].values)
+            except Exception as exc:
+                raise KeyError(
+                    f"Posterior does not contain public parameter {name!r}"
+                ) from exc
+
+            flattened[name] = values.reshape(-1)
+
+        sample_counts = {
+            values.size for values in flattened.values()
+        }
+
+        if len(sample_counts) != 1:
+            raise RuntimeError(
+                "Posterior variables have inconsistent sample counts"
+            )
+
+        sample_count = sample_counts.pop()
+
+        return [
+            {
+                name: float(flattened[name][index])
+                for name in self._parameter_names
+            }
+            for index in range(sample_count)
+        ]
+
+    def get_inference_data(self):
+        """Return PyMC's complete posterior result object."""
+        if self.idata is None:
+            raise ValueError(
+                "Calibration has not run. Call run() first."
+            )
+        return self.idata
+
+    def get_model(self) -> pm.Model:
+        """Return the constructed PyMC model."""
+        if self.model is None:
+            self._build_model()
+
+        assert self.model is not None
+        return self.model

@@ -231,10 +231,10 @@ class ChRCrashProtection:
         self._extra_sys_path = list(dict.fromkeys(paths))  # de-duped, ordered
 
         #4. build the crash-aware objective if one was supplied, else leave it None.
-        self.safe_objective_fn = self._make_safe_objective(objective_fn) if objective_fn is not None else None
+        self.objective_fn = self._make_safe_objective(objective_fn) if objective_fn is not None else None
 
         #5. expose the simulation function as an attribute for API consistency
-        self.safe_simulate_fn = self 
+        self.simulate_fn = self 
 
     #===== PUBLIC METHODS =====#
 
