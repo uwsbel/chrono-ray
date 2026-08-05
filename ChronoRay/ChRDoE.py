@@ -21,6 +21,13 @@ class ChRDoE:
                 ChRDoE is a design of experiments framework for PyChrono simulations.
                 It generates a set of parameter configurations according to a chosen
                 sampling design and runs all configurations in parallel using Ray.
+                Each trial reserves 1 CPU + 1 GPU, so Ray runs as many trials at once
+                as there are GPUs on the node.
+
+                Results are logged to disk as each trial finishes (a CSV of successes
+                and a JSON-lines file of failures). A sweep that dies partway can be
+                re-run: any config already logged — success OR failure — is skipped on
+                restart, matched by a hash of its parameter values.
 
                 Unlike ChRParamEst and ChRBayesOpt, there is no objective function
                 or scoring — the user's simulate_fn is responsible for logging
@@ -57,9 +64,6 @@ class ChRDoE:
                     Ignored for FULL_FACTORIAL (determined by factorial_level_spacing).
                     NOTE:    SOBOL requires a power-of-2 value — will auto round up.
 
-                max_concurrent_trials (int) [OPTIONAL, default: 2]
-                    Maximum number of trials running simultaneously.
-
                 factorial_level_spacing (dict[str, int]) [OPTIONAL, default: None]
                     Number of discrete levels per parameter for FULL_FACTORIAL.
                     Each continuous parameter is evenly divided into this many values
@@ -69,6 +73,16 @@ class ChRDoE:
                     Example: {"k": 5, "m": 4}
                         "k" → 5 evenly spaced values across its range
                         "m" → 4 log-spaced values across its range
+
+                results_prefix (str) [OPTIONAL, default: "chr_doe"]
+                    Filename prefix for the persistence logs, written to the current
+                    working directory:
+                        <prefix>_results.csv    — one row per completed trial
+                        <prefix>_failures.jsonl — one record per failed trial
+                    On restart, any config already present in either file (matched by
+                    a hash of its parameter values) is skipped, so a crashed sweep
+                    resumes instead of starting over. Use a distinct prefix per sweep
+                    to keep separate campaigns from sharing logs.
 
                 FLAG_log_to_file (bool) [OPTIONAL, default: False]
                     If True, Ray's console output is redirected to a timestamped
@@ -114,7 +128,6 @@ class ChRDoE:
 
                     Example:
                         doe = ChRDoE(..., FLAG_auto_run=False)
-                        doe.set_resources_per_trial(cpu=2, gpu=0)
                         doe.set_FLAG_log_to_file(True)
                         doe._build()
                         doe.run()
@@ -122,10 +135,6 @@ class ChRDoE:
             --------------------------------------------------------
             OPTIONAL SETTERS (MODE 2 only):
             --------------------------------------------------------
-
-                set_resources_per_trial(cpu: int, gpu: int)
-                    Set the CPU/GPU resources allocated per trial.
-                    Default: cpu=1, gpu=0
 
                 set_FLAG_log_to_file(flag: bool)
                     Toggle whether Ray output is redirected to a file. Default: False
@@ -145,8 +154,9 @@ class ChRDoE:
                 param_sample_space: dict[str, ChR_Distr],
                 sampling_design: SamplingDesign,
                 num_trials: int = 10,
-                max_concurrent_trials: int = 2,
+                # max_concurrent_trials: int = 2,
                 factorial_level_spacing: dict[str, int] = None,
+                results_prefix: str = "chr_doe",
                 FLAG_log_to_file: bool = False,
                 FLAG_auto_run: bool = True) -> None:
 
@@ -155,13 +165,18 @@ class ChRDoE:
         self.param_sample_space          = param_sample_space
         self.sampling_design             = sampling_design
         self.num_trials                  = num_trials
-        self.max_concurrent_trials       = max_concurrent_trials
+        # self.max_concurrent_trials       = max_concurrent_trials
         self.factorial_level_spacing     = factorial_level_spacing or {}
 
         #2. optional parameters
-        #TODO ITEM #1 
-        self.resources_per_trial   = {"cpu": 1, "gpu": 0}
+        #each trial reserves 1 CPU + 1 GPU (a Chrono FSI sim uses at most 1 GPU)
+        self.resources_per_trial   = {"cpu": 1, "gpu": 1}
         self.FLAG_log_to_file           = FLAG_log_to_file
+
+        #persistence: results + failures logged here; used to skip done configs on restart
+        self.results_prefix    = results_prefix
+        self._success_log_path = f"{results_prefix}_results.csv"
+        self._failure_log_path = f"{results_prefix}_failures.jsonl"
 
         self._validate_inputs()
         self._report_config()
@@ -267,6 +282,7 @@ class ChRDoE:
             print(f"  4. num_trials        : {self.num_trials}")
 
         print(f"  5. FLAG_log_to_file        : {self.FLAG_log_to_file}")
+        print(f"  6. results_prefix          : {self.results_prefix}")
 
         print("************************************************************")
 
@@ -383,10 +399,85 @@ class ChRDoE:
 
     @staticmethod
     def _execute_trial(simulate_fn, config):
-        import os
-        #TODO ITEM #2 
-        os.environ["CUDA_VISIBLE_DEVICES"] = "0"
+        import os, ray, torch
+        gpu_id = str(ray.get_runtime_context().get_accelerator_ids()["GPU"][0])
+        if torch.version.hip is not None:       # ROCm build
+            os.environ["HIP_VISIBLE_DEVICES"] = gpu_id
+        else:                                   # CUDA build
+            os.environ["CUDA_VISIBLE_DEVICES"] = gpu_id
         simulate_fn(config)
+
+
+    # -------------------------------------------------------------------------
+    # PERSISTENCE + RESUME
+    # -------------------------------------------------------------------------
+
+    @staticmethod
+    def _config_hash(config) -> str:
+        #stable id for a config = hash of its parameter values (sorted keys so the
+        #hash is order-independent; default=str handles numpy floats / categoricals).
+        #NOTE: keyed on VALUES, so two configs with identical params share a hash.
+        import hashlib, json
+        blob = json.dumps(config, sort_keys=True, default=str)
+        return hashlib.sha1(blob.encode()).hexdigest()[:16]
+
+    def _load_done_hashes(self) -> set:
+        #gather config hashes already logged (successes AND failures) so restart can
+        #skip them. missing files -> empty set (fresh run).
+        import os, csv, json
+        done = set()
+
+        if os.path.exists(self._success_log_path):
+            with open(self._success_log_path, newline="") as fh:
+                for row in csv.DictReader(fh):
+                    h = row.get("config_hash")
+                    if h:
+                        done.add(h)
+
+        if os.path.exists(self._failure_log_path):
+            with open(self._failure_log_path) as fh:
+                for line in fh:
+                    line = line.strip()
+                    if not line:
+                        continue
+                    try:
+                        done.add(json.loads(line)["config_hash"])
+                    except (json.JSONDecodeError, KeyError):
+                        continue
+
+        return done
+
+    def _log_success(self, config_hash, trial_index, config) -> None:
+        #append one row per completed trial; write the header once on file creation.
+        #open/append/close per write so each record is flushed before the next trial.
+        import os, csv
+        from datetime import datetime
+        names = list(self.param_sample_space.keys())
+        write_header = not os.path.exists(self._success_log_path)
+        with open(self._success_log_path, "a", newline="") as fh:
+            writer = csv.writer(fh)
+            if write_header:
+                writer.writerow(["timestamp", "trial_index", "config_hash"] + names)
+            writer.writerow(
+                [datetime.now().isoformat(), trial_index, config_hash]
+                + [config.get(n) for n in names]
+            )
+
+    def _log_failure(self, config_hash, trial_index, config, error) -> None:
+        #append one JSON record per failed trial (config values stringified so numpy
+        #types serialize cleanly).
+        import json
+        from datetime import datetime
+        record = {
+            "timestamp":   datetime.now().isoformat(),
+            "trial_index": trial_index,
+            "config_hash": config_hash,
+            "error_type":  type(error).__name__,
+            "error":       str(error),
+            "config":      {k: str(v) for k, v in config.items()},
+        }
+        with open(self._failure_log_path, "a") as fh:
+            fh.write(json.dumps(record) + "\n")
 
 
     # -------------------------------------------------------------------------
@@ -394,10 +485,10 @@ class ChRDoE:
     # -------------------------------------------------------------------------
 
 
-    def set_resources_per_trial(self, cpu: int, gpu: int) -> None:
-        if self.FLAG_auto_run:
-            raise ValueError("Cannot set resources_per_trial after (auto-)run has started")
-        self.resources_per_trial = {"cpu": cpu, "gpu": gpu}
+    # def set_resources_per_trial(self, cpu: int, gpu: int) -> None:
+    #     if self.FLAG_auto_run:
+    #         raise ValueError("Cannot set resources_per_trial after (auto-)run has started")
+    #     self.resources_per_trial = {"cpu": cpu, "gpu": gpu}
 
     def set_FLAG_log_to_file(self, flag: bool) -> None:
         if self.FLAG_auto_run:
@@ -457,14 +548,49 @@ class ChRDoE:
         self.FLAG_auto_run = True
 
         # wrap _execute_trial as a Ray remote function, reserving resources per trial
-        remote_fn = ray.remote(max_calls=1)(ChRDoE._execute_trial).options(
+        remote_fn = ray.remote(max_calls=1, max_retries=0)(ChRDoE._execute_trial).options(
             num_cpus=self.resources_per_trial["cpu"],
             num_gpus=self.resources_per_trial["gpu"],
         )
 
-        # fire off all trials in parallel — .remote() returns immediately with a future
+        # resume: skip any config already logged (success OR failure) on a previous
+        # run, matched by a hash of its parameter values. keep the ORIGINAL index so
+        # console/log records line up across runs.
+        done_hashes = self._load_done_hashes()
+        pending = [
+            (i, c) for i, c in enumerate(self._configs)
+            if ChRDoE._config_hash(c) not in done_hashes
+        ]
+        n_skipped = len(self._configs) - len(pending)
+        if n_skipped:
+            print(f"  Resuming: {n_skipped} configs already logged, {len(pending)} remaining.")
+
+        # fire off only the pending trials — .remote() returns immediately with a future.
         # Ray queues and runs them concurrently up to the available resource limit
-        for i in range(0, len(self._configs), self.max_concurrent_trials):
-            batch = self._configs[i:i + self.max_concurrent_trials]
-            futures = [remote_fn.remote(self.simulate_fn, config) for config in batch]
-            ray.get(futures)
+        # (one GPU per trial). Pair each future with its original index + config so
+        # results can be logged as they complete.
+        futures = [
+            (remote_fn.remote(self.simulate_fn, c), i, c)
+            for (i, c) in pending
+        ]
+
+        # collect results one at a time so a single failed trial (Chrono crash,
+        # OOM-kill, or a raised exception) is caught here instead of aborting the
+        # whole sweep. simulate_fn logs its own output; here we persist completion
+        # to disk (driver-side, single-threaded) so a crashed sweep can resume.
+        n_ok = 0
+        n_failed = 0
+        for f, i, c in futures:
+            h = ChRDoE._config_hash(c)
+            try:
+                ray.get(f)
+                self._log_success(h, i, c)
+                n_ok += 1
+            except Exception as e:
+                self._log_failure(h, i, c, e)
+                n_failed += 1
+                print(f"  TRIAL {i} FAILED ({type(e).__name__}): {e}", flush=True)
+
+        print(f"  DoE complete: {n_ok} succeeded, {n_failed} failed, "
+              f"{n_skipped} skipped (already logged). "
+              f"Results -> {self._success_log_path}")
