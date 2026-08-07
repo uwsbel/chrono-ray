@@ -25,3 +25,15 @@ in general, there might be a way to help a user utilize resources properly based
 ======ITEM #4 
 
 see if you can move ChRCrashProtection into level zero 
+
+======ITEM #5 
+
+problem for later 
+
+=====ITEM #6 
+
+The comments and such for ChR_ChronoRay need to be updated... additionally lets just make sure 
+all the documentation across files is consistent and everything prints to console nicely. 
+
+oh, also all workflows (*cough* DoE *cough*) dont log to file properly lol 
+

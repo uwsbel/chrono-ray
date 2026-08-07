@@ -53,6 +53,10 @@ class ChRBayesOpt:
                 total_trials (int) [OPTIONAL, default: 10]
                     Total number of simulation trials to run.
 
+                resources_per_trial (dict[str, int]) [OPTIONAL, default: {"cpu": 1, "gpu": 0}]
+                    CPU/GPU resources allocated per trial.
+                    NOTE:    in MODE 2 this can also be set via set_resources_per_trial.
+
                 max_concurrent_trials (int) [OPTIONAL, default: 2]
                     Maximum number of trials running simultaneously.
 
@@ -63,6 +67,28 @@ class ChRBayesOpt:
 
                 FLAG_auto_run (bool) [OPTIONAL, default: True]
                     Controls the operating mode. See OPERATING MODES below.
+
+                FLAG_start_restore_session (bool) [OPTIONAL, default: False]
+                    If True, the run is written to disk as a restorable experiment
+                    so it can be resumed later. Use this for the FIRST run of a job
+                    you expect to be interrupted (e.g. cluster wall-time limits).
+
+                FLAG_restore_from_previous_session (bool) [OPTIONAL, default: False]
+                    If True, resume a previously started restorable experiment from
+                    disk instead of starting fresh. Completed trials and the search
+                    state are restored; unfinished trials continue.
+                    NOTE:    mutually exclusive with FLAG_start_restore_session. If
+                             both are True, FLAG_start_restore_session takes precedence.
+
+                restore_experiment_name (str) [OPTIONAL, default: "chronoray_restorable_experiment"]
+                    Name of the restorable experiment. Must match between the initial
+                    (FLAG_start_restore_session) run and any resumed
+                    (FLAG_restore_from_previous_session) runs.
+
+                restore_experiment_storage_path (str) [OPTIONAL, default: "chronoray_restorable_storage"]
+                    Directory (relative to the current working directory) where the
+                    restorable experiment is stored. Must match between the initial
+                    and resumed runs.
 
             --------------------------------------------------------
             OPERATING MODES:
@@ -123,9 +149,14 @@ class ChRBayesOpt:
                 param_sample_space: dict[str, ChR_Distr],
                 mode: str,
                 total_trials: int = 10,
+                resources_per_trial: dict[str, int] = {"cpu": 1, "gpu": 0},
                 max_concurrent_trials: int = 2,
                 FLAG_log_to_file: bool = False,
-                FLAG_auto_run: bool = True) -> None:
+                FLAG_auto_run: bool = True,
+                FLAG_start_restore_session: bool = False,
+                FLAG_restore_from_previous_session: bool = False,
+                restore_experiment_name: str = "chronoray_restorable_experiment",
+                restore_experiment_storage_path: str = "chronoray_restorable_storage") -> None:
 
         #1. mandatory parameters
         self.simulate_fn = simulate_fn
@@ -136,8 +167,13 @@ class ChRBayesOpt:
         self.max_concurrent_trials = max_concurrent_trials
 
         #2. optional parameters
-        self.resources_per_trial = {"cpu": 1, "gpu": 0}
+        self.resources_per_trial = resources_per_trial
         self.FLAG_log_to_file = FLAG_log_to_file
+
+        self.FLAG_start_restore_session = FLAG_start_restore_session
+        self.FLAG_restore_from_previous_session = FLAG_restore_from_previous_session
+        self.restore_experiment_name = restore_experiment_name
+        self.restore_experiment_storage_path = restore_experiment_storage_path
 
         self._validate_inputs()
         self._report_config()
@@ -193,8 +229,13 @@ class ChRBayesOpt:
 
         print(f"  4. mode               : {self.mode}")
         print(f"  5. total_trials       : {self.total_trials}")
-        print(f"  6. search_algorithm   : BAYESOPT (fixed)")
-        print(f"  7. FLAG_log_to_file        : {self.FLAG_log_to_file}")
+        print(f"  6. resources_per_trial: {self.resources_per_trial}")
+        print(f"  7. search_algorithm   : BAYESOPT (fixed)")
+        print(f"  8. FLAG_log_to_file   : {self.FLAG_log_to_file}")
+        print(f"  9. FLAG_start_restore_session         : {self.FLAG_start_restore_session}")
+        print(f" 10. FLAG_restore_from_previous_session : {self.FLAG_restore_from_previous_session}")
+        print(f" 11. restore_experiment_name           : {self.restore_experiment_name}")
+        print(f" 12. restore_experiment_storage_path   : {self.restore_experiment_storage_path}")
         print("************************************************************")
 
     #<3 METHODS IN USER INTERFACE
@@ -223,6 +264,10 @@ class ChRBayesOpt:
             mode=self.mode,
             search_algorithm=ChR_SearchAlg.BAYESOPT,
             search_kwargs={},
+            FLAG_start_restore_session=self.FLAG_start_restore_session,
+            FLAG_restore_from_previous_session=self.FLAG_restore_from_previous_session,
+            restore_experiment_name=self.restore_experiment_name,
+            restore_experiment_storage_path=self.restore_experiment_storage_path,
         )
 
     def run(self) -> None:

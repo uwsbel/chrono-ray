@@ -14,6 +14,7 @@ from ray import tune
 from ray.tune.search import ConcurrencyLimiter
 from ray.air import session
 from ChronoRay.ChR_Config import ChR_SearchAlg
+import os
 
 
 
@@ -127,6 +128,10 @@ class ChR_ChronoRay:
         mode, 
         search_algorithm,
         search_kwargs,
+        FLAG_start_restore_session = False, 
+        FLAG_restore_from_previous_session = False,
+        restore_experiment_name = "chronoray_restorable_experiment", 
+        restore_experiment_storage_path = "chronoray_restorable_storage"
     ):
         self.simulate_fn           = simulate_fn
         self.objective_fn          = objective_fn
@@ -139,7 +144,10 @@ class ChR_ChronoRay:
         self.search_kwargs         = search_kwargs or {}
         self.metric                = "objective"
         self._search_alg           = None
-
+        self.FLAG_start_restore_session = FLAG_start_restore_session
+        self.FLAG_restore_from_previous_session = FLAG_restore_from_previous_session
+        self.restore_experiment_name = restore_experiment_name
+        self.restore_experiment_storage_path = os.path.join(os.getcwd(), restore_experiment_storage_path)
    
 
     def _build_search_alg(self):
@@ -282,6 +290,7 @@ class ChR_ChronoRay:
         # suppress Ray console output
         os.environ["RAY_AIR_NEW_OUTPUT"] = "0"
         os.environ["TUNE_DISABLE_AUTO_CALLBACK_LOGGERS"] = "1"
+        os.environ["TUNE_GLOBAL_CHECKPOINT_S"] = "0"   # snapshot experiment state after every trial
 
         for name in ["ray", "ray.tune", "ray.tune.registry", "ray._private"]:
             logging.getLogger(name).setLevel(logging.ERROR)
@@ -314,7 +323,7 @@ class ChR_ChronoRay:
                 configure_logging=False
             )
 
-        self._search_alg = self._build_search_alg()
+        self._search_alg = None if self.FLAG_restore_from_previous_session else self._build_search_alg()
 
         trainable = tune.with_resources(
             self._trial,
@@ -325,10 +334,32 @@ class ChR_ChronoRay:
         if self._search_alg is not None:
             tune_config_kwargs["search_alg"] = self._search_alg
 
-        tuner = tune.Tuner(
-            trainable,
-            param_space=self.param_space,
-            tune_config=tune.TuneConfig(**tune_config_kwargs),
-        )
+        tuner = None 
+
+        if self.FLAG_start_restore_session:
+            os.makedirs(self.restore_experiment_storage_path, exist_ok=True)
+            tuner = tune.Tuner(
+                trainable,
+                param_space=self.param_space,
+                tune_config=tune.TuneConfig(**tune_config_kwargs),
+                run_config=tune.RunConfig(name=self.restore_experiment_name, storage_path=self.restore_experiment_storage_path),
+            )
+        elif self.FLAG_restore_from_previous_session:
+            restore_dir = os.path.join(self.restore_experiment_storage_path, self.restore_experiment_name)
+            if tune.Tuner.can_restore(restore_dir):
+                tuner = tune.Tuner.restore(
+                    restore_dir,
+                    trainable=trainable,
+                    resume_unfinished=True,
+                    resume_errored=False,
+                ) #TODO #5 resume errored might avoid trials that were killed due to timeout on cluster, leaving it as user implementation problem for now.
+            else:
+                raise ValueError(f"Experiment {self.restore_experiment_name} not found in {self.restore_experiment_storage_path}, CANNOT RESUME EXPERIMENT")
+        else:
+            tuner = tune.Tuner(
+                trainable,
+                param_space=self.param_space,
+                tune_config=tune.TuneConfig(**tune_config_kwargs),
+            )
 
         return tuner.fit()
