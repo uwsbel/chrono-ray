@@ -37,3 +37,8 @@ all the documentation across files is consistent and everything prints to consol
 
 oh, also all workflows (*cough* DoE *cough*) dont log to file properly lol 
 
+=====ITEM #7 
+
+ChRDispersionOpt probablly needs more safegaurds for an incorrect mismatch between virtual expeirment 
+configuration and allocation of hardware. 
+
