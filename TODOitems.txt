@@ -42,3 +42,8 @@ oh, also all workflows (*cough* DoE *cough*) dont log to file properly lol
 ChRDispersionOpt probablly needs more safegaurds for an incorrect mismatch between virtual expeirment 
 configuration and allocation of hardware. 
 
+
+====ITEM #8 
+
+expose all the diff search alg via Optuna and add the optuna imports to the level 0 files as well as the dep in the env 
+
