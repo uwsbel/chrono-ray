@@ -18,3 +18,4 @@ from ChronoRay.ChROpt import ChROpt
 from ChronoRay.ChRBayesCali import ChRBayesCali
 from ChronoRay.ChRCrashProtection import ChRCrashProtection
 from ChronoRay.ChRDispersionOpt import ChRDispersionOpt
+from ChronoRay.ChRConvergeTest import ChRConvergeTest
