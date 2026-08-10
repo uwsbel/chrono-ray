@@ -9,12 +9,12 @@ import ray
 from ChronoRay.ChR_Config import ChR_Distr
 
 
-class ChRConversionTest:
+class ChRConvergeTest:
 
     @staticmethod
     def info() -> None:
         print("========================================================")
-        print("ChRConversionTest - Sobol dispersion sample-size (N) convergence study")
+        print("ChRConvergeTest - Sobol dispersion sample-size (N) convergence study")
         print("========================================================")
         print("""
             DESCRIPTION:
@@ -128,7 +128,7 @@ class ChRConversionTest:
     def _validate_inputs(self) -> None:
         print("************************************************************")
         print("Validating inputs...")
-        print("run ChRConversionTest.info() for usage.")
+        print("run ChRConvergeTest.info() for usage.")
         print("************************************************************")
 
         if not callable(self.simulate_fn):
@@ -146,7 +146,7 @@ class ChRConversionTest:
 
         #dispersion distributions must be Sobol-samplable
         for name, d in self.dispersion_sample_space.items():
-            if not ChRConversionTest._is_sobol_compatible(d):
+            if not ChRConvergeTest._is_sobol_compatible(d):
                 raise TypeError(
                     f"Dispersion parameter '{name}' uses a distribution incompatible with Sobol "
                     f"sampling. Compatible: uniform, loguniform, randint, choice, grid_search."
@@ -169,7 +169,7 @@ class ChRConversionTest:
         Ns = self._powers(self.min_power, self.max_power)
         print("************************************************************")
         print("========================================================")
-        print("ChRConversionTest configuration:")
+        print("ChRConvergeTest configuration:")
         print("========================================================")
         print(f"  1. simulate_fn       : {self.simulate_fn.__name__}")
         print(f"  2. metrics_fn        : {self.metrics_fn.__name__}")
@@ -198,7 +198,7 @@ class ChRConversionTest:
     def _is_sobol_compatible(d) -> bool:
         if isinstance(d, ChR_Distr._ChRDistrDict):
             return True
-        distr_type, sampler = ChRConversionTest._get_distr_info(d)
+        distr_type, sampler = ChRConvergeTest._get_distr_info(d)
         if distr_type == "Categorical":
             return True
         if distr_type == "Integer" and sampler == "Uniform":
@@ -214,7 +214,7 @@ class ChRConversionTest:
             for j, name in enumerate(names):
                 d = self.dispersion_sample_space[name]
                 u = samples[i, j]
-                distr_type, sampler = ChRConversionTest._get_distr_info(d)
+                distr_type, sampler = ChRConvergeTest._get_distr_info(d)
 
                 if distr_type == "Float" and sampler == "Uniform":
                     ticket[name] = d.lower + u * (d.upper - d.lower)
@@ -271,7 +271,7 @@ class ChRConversionTest:
         design = dict(design)
 
         remote_sample = ray.remote(max_calls=1, max_retries=0)(
-            ChRConversionTest._run_dispersion_sample
+            ChRConvergeTest._run_dispersion_sample
         ).options(num_gpus=self.gpus_per_sample, num_cpus=self.cpus_per_sample)
 
         futures = [
