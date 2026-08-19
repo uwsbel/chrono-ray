@@ -134,23 +134,22 @@ def simulate_fn(config):
     #get wheel/tire references (for logging) before entering the loop
     vehicle = hmmwv.GetVehicle()
 
-    tire_FL = vehicle.GetAxle(0).m_wheels[veh.VehicleSide_LEFT].GetTire()
-    tire_FR = vehicle.GetAxle(0).m_wheels[veh.VehicleSide_RIGHT].GetTire()
-    tire_RL = vehicle.GetAxle(1).m_wheels[veh.VehicleSide_LEFT].GetTire()
-    tire_RR = vehicle.GetAxle(1).m_wheels[veh.VehicleSide_RIGHT].GetTire()
+    tire_FL = vehicle.GetAxle(0).m_wheels[veh.LEFT].GetTire()
+    tire_FR = vehicle.GetAxle(0).m_wheels[veh.RIGHT].GetTire()
+    tire_RL = vehicle.GetAxle(1).m_wheels[veh.LEFT].GetTire()
+    tire_RR = vehicle.GetAxle(1).m_wheels[veh.RIGHT].GetTire()
 
     csv_file = os.path.join(OUTPUT_DIR, f"trial_{os.getpid()}_{uuid.uuid4().hex[:8]}.csv")
 
     with open(csv_file, "w", newline="") as f:
         writer = csv.writer(f)
-
-    writer.writerow([
-        "time",
-        "FL_Fx", "FL_Fy", "FL_Fz",
-        "FR_Fx", "FR_Fy", "FR_Fz",
-        "RL_Fx", "RL_Fy", "RL_Fz",
-        "RR_Fx", "RR_Fy", "RR_Fz",
-    ])
+        writer.writerow([
+            "time",
+            "FL_Fx", "FL_Fy", "FL_Fz",
+            "FR_Fx", "FR_Fy", "FR_Fz",
+            "RL_Fx", "RL_Fy", "RL_Fz",
+            "RR_Fx", "RR_Fy", "RR_Fz",
+        ])
 
     #7. simulation loop
     time = 0.0
@@ -172,13 +171,15 @@ def simulate_fn(config):
         force_RR = tire_RR.ReportTireForce(terrain).force
 
         #7d. log current state
-        writer.writerow([
-            time,
-            force_FL.x, force_FL.y, force_FL.z,
-            force_FR.x, force_FR.y, force_FR.z,
-            force_RL.x, force_RL.y, force_RL.z,
-            force_RR.x, force_RR.y, force_RR.z,
-        ])
+        with open(csv_file, "a", newline="") as f:
+            writer = csv.writer(f)
+            writer.writerow([
+                time,
+                force_FL.x, force_FL.y, force_FL.z,
+                force_FR.x, force_FR.y, force_FR.z,
+                force_RL.x, force_RL.y, force_RL.z,
+                force_RR.x, force_RR.y, force_RR.z,
+            ])
 
         #7e. advance simulation for one timestep
         driver.Advance(SIM_DT)
@@ -193,14 +194,14 @@ def simulate_fn(config):
 ######################################################################
 
 param_space = {
-    "kphi": ChRDoE.uniform(1e5, 5e6),                           #[Pa/m]
-    "kc": ChRDoE.uniform(0, 1e5),                               #[Pa]
-    "n": ChRDoE.uniform(0.7, 1.3),                              #[-]
-    "mohr_cohesive_limit": ChRDoE.uniform(0, 20e3),             #[Pa]
-    "mohr_friction_limit": ChRDoE.uniform(20, 40),              #[Degrees]
-    "janosi_shear_coefficient": ChRDoE.uniform(0.005, 0.05),    #[m]
-    "elastic_stiffness": ChRDoE.uniform(1e7, 2e8),              #[Pa/m]
-    "damping": ChRDoE.uniform(1e3, 5e4)                         #[Pa*s/m]
+    "kphi": ChRDoE.ChR_Distr.uniform(1e5, 5e6),                           #[Pa/m]
+    "kc": ChRDoE.ChR_Distr.uniform(0, 1e5),                               #[Pa]
+    "n": ChRDoE.ChR_Distr.uniform(0.7, 1.3),                              #[-]
+    "mohr_cohesive_limit": ChRDoE.ChR_Distr.uniform(0, 20e3),             #[Pa]
+    "mohr_friction_limit": ChRDoE.ChR_Distr.uniform(20, 40),              #[Degrees]
+    "janosi_shear_coefficient": ChRDoE.ChR_Distr.uniform(0.005, 0.05),    #[m]
+    "elastic_stiffness": ChRDoE.ChR_Distr.uniform(1e7, 2e8),              #[Pa/m]
+    "damping": ChRDoE.ChR_Distr.uniform(1e3, 5e4)                         #[Pa*s/m]
 }
 
 ######################################################################
@@ -222,7 +223,7 @@ if __name__ == "__main__":
 
     doe = ChRDoE(
         simulate_fn = simulate_fn,
-        param_space = param_space,
+        param_sample_space = param_space,
         sampling_design = ChRDoE.SamplingDesign.SOBOL,
         num_trials = 2**10,
         num_gpus = args.num_gpu,
