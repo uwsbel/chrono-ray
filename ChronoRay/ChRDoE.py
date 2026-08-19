@@ -64,6 +64,12 @@ class ChRDoE:
                     Ignored for FULL_FACTORIAL (determined by factorial_level_spacing).
                     NOTE:    SOBOL requires a power-of-2 value — will auto round up.
 
+                num_gpus (int | None) [OPTIONAL, default: None]
+                    Number of GPUs Ray should use. None means use every GPU visible
+                    to Ray (normally the GPUs granted by the scheduler/partition).
+                    Each DoE configuration reserves exactly one GPU, so Ray keeps
+                    the available GPUs filled from the queued configurations.
+
                 factorial_level_spacing (dict[str, int]) [OPTIONAL, default: None]
                     Number of discrete levels per parameter for FULL_FACTORIAL.
                     Each continuous parameter is evenly divided into this many values
@@ -154,7 +160,7 @@ class ChRDoE:
                 param_sample_space: dict[str, ChR_Distr],
                 sampling_design: SamplingDesign,
                 num_trials: int = 10,
-                # max_concurrent_trials: int = 2,
+                num_gpus: int | None = None,
                 factorial_level_spacing: dict[str, int] = None,
                 results_prefix: str = "chr_doe",
                 FLAG_log_to_file: bool = False,
@@ -165,7 +171,7 @@ class ChRDoE:
         self.param_sample_space          = param_sample_space
         self.sampling_design             = sampling_design
         self.num_trials                  = num_trials
-        # self.max_concurrent_trials       = max_concurrent_trials
+        self.num_gpus                    = num_gpus
         self.factorial_level_spacing     = factorial_level_spacing or {}
 
         #2. optional parameters
@@ -213,6 +219,12 @@ class ChRDoE:
         #3. sampling design check
         if not isinstance(self.sampling_design, ChRDoE.SamplingDesign):
             raise TypeError("sampling_design must be a ChRDoE.SamplingDesign enum member.")
+
+        #3a. optional GPU-count check. None means "use every GPU Ray can see"
+        #     (e.g. all GPUs exposed by the scheduler/partition allocation).
+        if self.num_gpus is not None:
+            if not (isinstance(self.num_gpus, int) and self.num_gpus > 0):
+                raise ValueError("num_gpus must be a positive integer or None")
 
         #4. full factorial specific checks
         if self.sampling_design == ChRDoE.SamplingDesign.FULL_FACTORIAL:
@@ -281,8 +293,10 @@ class ChRDoE:
         else:
             print(f"  4. num_trials        : {self.num_trials}")
 
-        print(f"  5. FLAG_log_to_file        : {self.FLAG_log_to_file}")
-        print(f"  6. results_prefix          : {self.results_prefix}")
+        print(f"  5. GPUs requested          : {self.num_gpus if self.num_gpus is not None else 'all visible to Ray'}")
+        print(f"  6. resources/config        : {self.resources_per_trial}")
+        print(f"  7. FLAG_log_to_file        : {self.FLAG_log_to_file}")
+        print(f"  8. results_prefix          : {self.results_prefix}")
 
         print("************************************************************")
 
@@ -399,13 +413,32 @@ class ChRDoE:
 
     @staticmethod
     def _execute_trial(simulate_fn, config):
-        import os, ray, torch
-        gpu_id = str(ray.get_runtime_context().get_accelerator_ids()["GPU"][0])
-        if torch.version.hip is not None:       # ROCm build
+        # One Ray task == one DoE configuration == one reserved GPU.
+        # Ray decides which GPU the task owns; we then pin Chrono to that device.
+        import os
+
+        gpu_ids = ray.get_runtime_context().get_accelerator_ids().get("GPU", [])
+        if not gpu_ids:
+            raise RuntimeError(
+                "DoE trial was scheduled without a GPU. "
+                "Each configuration requires one GPU."
+            )
+
+        gpu_id = str(gpu_ids[0])
+
+        # Match the robust-dispersion workflow: detect ROCm vs CUDA if torch exists.
+        try:
+            import torch
+            is_hip = torch.version.hip is not None
+        except ImportError:
+            is_hip = False
+
+        if is_hip:
             os.environ["HIP_VISIBLE_DEVICES"] = gpu_id
-        else:                                   # CUDA build
+        else:
             os.environ["CUDA_VISIBLE_DEVICES"] = gpu_id
-        simulate_fn(config)
+
+        return simulate_fn(config)
 
 
     # -------------------------------------------------------------------------
@@ -539,11 +572,17 @@ class ChRDoE:
             sys.stderr = _TeeStream(log_file)
 
         if not ray.is_initialized():
-            ray.init(
+            ray_init_kwargs = dict(
                 logging_level=logging.ERROR,
                 log_to_driver=False,
-                configure_logging=False
+                configure_logging=False,
             )
+            # If None, let Ray detect the GPUs exposed by the scheduler/partition.
+            # Otherwise cap Ray to the requested number of GPUs.
+            if self.num_gpus is not None:
+                ray_init_kwargs["num_gpus"] = self.num_gpus
+
+            ray.init(**ray_init_kwargs)
 
         self.FLAG_auto_run = True
 
@@ -569,19 +608,25 @@ class ChRDoE:
         # Ray queues and runs them concurrently up to the available resource limit
         # (one GPU per trial). Pair each future with its original index + config so
         # results can be logged as they complete.
-        futures = [
-            (remote_fn.remote(self.simulate_fn, c), i, c)
+        future_meta = {
+            remote_fn.remote(self.simulate_fn, c): (i, c)
             for (i, c) in pending
-        ]
+        }
 
-        # collect results one at a time so a single failed trial (Chrono crash,
-        # OOM-kill, or a raised exception) is caught here instead of aborting the
-        # whole sweep. simulate_fn logs its own output; here we persist completion
-        # to disk (driver-side, single-threaded) so a crashed sweep can resume.
+        # All configurations are submitted up front. Because every task reserves
+        # exactly one GPU, Ray runs one config per available GPU and immediately
+        # back-fills that GPU with the next queued config when a task finishes.
+        # ray.wait lets the driver process completions in finish order.
         n_ok = 0
         n_failed = 0
-        for f, i, c in futures:
+        remaining = list(future_meta.keys())
+
+        while remaining:
+            ready, remaining = ray.wait(remaining, num_returns=1)
+            f = ready[0]
+            i, c = future_meta[f]
             h = ChRDoE._config_hash(c)
+
             try:
                 ray.get(f)
                 self._log_success(h, i, c)

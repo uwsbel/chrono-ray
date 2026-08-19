@@ -7,4 +7,5 @@
 */movie/ 
 */movie-*/
 */*.png
-personal_notes.txt
+personal_notes.txt\
+resume_smoke_test.py
