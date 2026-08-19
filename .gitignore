@@ -10,3 +10,4 @@
 personal_notes.txt\
 resume_smoke_test.py
 private/
+__pycache__/
