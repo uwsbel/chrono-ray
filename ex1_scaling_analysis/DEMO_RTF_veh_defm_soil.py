@@ -46,6 +46,9 @@ import pychrono.vehicle as veh
 import math as m
 import argparse
 import time as wallclock 
+import os 
+import uuid
+import csv
 
 ######################################################################
 ##== HELPER CLASS NEEDED FOR PYCHRONO SIMULATION, NOT CHRONO::RAY ==##
@@ -86,9 +89,12 @@ TERRAIN_DELTA = 0.05    #terrain (SCM) grid spacing
 TOTAL_SIM_TIME = 5.0   #[s]
 SIM_DT = 1e-3          #[s]
 
-
+OUTPUT_DIR = "rtf_demo_results"
 
 if __name__ == "__main__":
+
+    os.makedirs(OUTPUT_DIR, exist_ok=True)
+    csv_file = os.path.join(OUTPUT_DIR, "rtf_demo_results.csv")
 
     ##STARTING THE SIMULATION##
     
@@ -126,21 +132,65 @@ if __name__ == "__main__":
     #5. initialize the terrain, specifying the initial mesh grid
     terrain.Initialize(TERRAIN_LENGTH, TERRAIN_WIDTH, TERRAIN_DELTA);
 
-    #6. simulation loop
+    #6. setup logging 
+
+    #get wheel/tire references (for logging) before entering the loop
+    vehicle = hmmwv.GetVehicle()
+
+    tire_FL = vehicle.GetAxle(0).m_wheels[veh.VehicleSide_LEFT].GetTire()
+    tire_FR = vehicle.GetAxle(0).m_wheels[veh.VehicleSide_RIGHT].GetTire()
+    tire_RL = vehicle.GetAxle(1).m_wheels[veh.VehicleSide_LEFT].GetTire()
+    tire_RR = vehicle.GetAxle(1).m_wheels[veh.VehicleSide_RIGHT].GetTire()
+
+    csv_file = os.path.join(OUTPUT_DIR, f"trial_{os.getpid()}_{uuid.uuid4().hex[:8]}.csv")
+
+    with open(csv_file, "w", newline="") as f:
+        writer = csv.writer(f)
+
+    writer.writerow([
+        "time",
+        "FL_Fx", "FL_Fy", "FL_Fz",
+        "FR_Fx", "FR_Fy", "FR_Fz",
+        "RL_Fx", "RL_Fy", "RL_Fz",
+        "RR_Fx", "RR_Fy", "RR_Fz",
+    ])
+
+    #7. simulation loop
     time = 0.0
-    wall_start = wallclock.perf_counter()   # start timer just before the loop
-
+    wall_start = wallclock.perf_counter() 
+    
     while time < TOTAL_SIM_TIME:
-        time += SIM_DT
 
-        #6a-c. (driver / terrain / hmmwv synchronize + advance, unchanged)
+        #7a. get driver inputs
         driver_inputs = driver.GetInputs()
+
+        #7b. update modules
         driver.Synchronize(time)
         terrain.Synchronize(time)
         hmmwv.Synchronize(time, driver_inputs, terrain)
+
+        #7c. report tire-terrain forces
+        force_FL = tire_FL.ReportTireForce(terrain).force
+        force_FR = tire_FR.ReportTireForce(terrain).force
+        force_RL = tire_RL.ReportTireForce(terrain).force
+        force_RR = tire_RR.ReportTireForce(terrain).force
+
+        #7d. log current state
+        writer.writerow([
+            time,
+            force_FL.x, force_FL.y, force_FL.z,
+            force_FR.x, force_FR.y, force_FR.z,
+            force_RL.x, force_RL.y, force_RL.z,
+            force_RR.x, force_RR.y, force_RR.z,
+        ])
+
+        #7e. advance simulation for one timestep
         driver.Advance(SIM_DT)
         terrain.Advance(SIM_DT)
         hmmwv.Advance(SIM_DT)
+
+        time += SIM_DT
+
 
     wall_elapsed = wallclock.perf_counter() - wall_start
     sim_elapsed  = time   # total simulated seconds

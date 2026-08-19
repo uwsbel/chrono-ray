@@ -16,9 +16,10 @@
 # execution through the Chrono::Ray design-of-experiments (DoE) workflow.
 #
 # The underlying PyChrono simulation models a HMMWV operating on SCM deformable
-# terrain. Selected SCM soil parameters are exposed through a Chrono::Ray
-# parameter space and sampled using a Sobol design. Each sampled configuration
-# is evaluated by the simulation callable `simulate_fn`.
+# terrain and logging tire-terrain forces. Selected SCM soil parameters are exposed 
+# through a Chrono::Ray parameter space and sampled using a Sobol design. 
+# Each sampled configuration is evaluated by the simulation callable `simulate_fn`
+# and the results are logged to a CSV file.
 #
 # The number of GPUs used by the Chrono::Ray workflow may be specified from the
 # command line with:
@@ -40,6 +41,9 @@ import pychrono as chrono
 import pychrono.vehicle as veh
 import math as m
 import argparse
+import os 
+import uuid
+import csv
 
 from ChronoRay import ChRDoE
 
@@ -82,6 +86,8 @@ TERRAIN_DELTA = 0.05    #terrain (SCM) grid spacing
 
 TOTAL_SIM_TIME = 5.0   #[s]
 SIM_DT = 1e-3          #[s]
+OUTPUT_DIR = "chrdoe_demo_results"
+os.makedirs(OUTPUT_DIR, exist_ok=True)
 
 def simulate_fn(config):
 
@@ -123,26 +129,65 @@ def simulate_fn(config):
     #5. initialize the terrain, specifying the initial mesh grid
     terrain.Initialize(TERRAIN_LENGTH, TERRAIN_WIDTH, TERRAIN_DELTA);
 
-    #6. simulation loop
-    time = 0.0
-    while time < TOTAL_SIM_TIME:
-        time += SIM_DT
+    #6. setup logging 
 
-        #6a. get driver inputs
+    #get wheel/tire references (for logging) before entering the loop
+    vehicle = hmmwv.GetVehicle()
+
+    tire_FL = vehicle.GetAxle(0).m_wheels[veh.VehicleSide_LEFT].GetTire()
+    tire_FR = vehicle.GetAxle(0).m_wheels[veh.VehicleSide_RIGHT].GetTire()
+    tire_RL = vehicle.GetAxle(1).m_wheels[veh.VehicleSide_LEFT].GetTire()
+    tire_RR = vehicle.GetAxle(1).m_wheels[veh.VehicleSide_RIGHT].GetTire()
+
+    csv_file = os.path.join(OUTPUT_DIR, f"trial_{os.getpid()}_{uuid.uuid4().hex[:8]}.csv")
+
+    with open(csv_file, "w", newline="") as f:
+        writer = csv.writer(f)
+
+    writer.writerow([
+        "time",
+        "FL_Fx", "FL_Fy", "FL_Fz",
+        "FR_Fx", "FR_Fy", "FR_Fz",
+        "RL_Fx", "RL_Fy", "RL_Fz",
+        "RR_Fx", "RR_Fy", "RR_Fz",
+    ])
+
+    #7. simulation loop
+    time = 0.0
+
+    while time < TOTAL_SIM_TIME:
+
+        #7a. get driver inputs
         driver_inputs = driver.GetInputs()
 
-        #6b. update modules (process inputs from other modules)
+        #7b. update modules
         driver.Synchronize(time)
         terrain.Synchronize(time)
-        hmmwv.Synchronize(time, driver_inputs, terrain)    
+        hmmwv.Synchronize(time, driver_inputs, terrain)
 
-        #6c. advance simulation for one timestep for all modules
+        #7c. report tire-terrain forces
+        force_FL = tire_FL.ReportTireForce(terrain).force
+        force_FR = tire_FR.ReportTireForce(terrain).force
+        force_RL = tire_RL.ReportTireForce(terrain).force
+        force_RR = tire_RR.ReportTireForce(terrain).force
+
+        #7d. log current state
+        writer.writerow([
+            time,
+            force_FL.x, force_FL.y, force_FL.z,
+            force_FR.x, force_FR.y, force_FR.z,
+            force_RL.x, force_RL.y, force_RL.z,
+            force_RR.x, force_RR.y, force_RR.z,
+        ])
+
+        #7e. advance simulation for one timestep
         driver.Advance(SIM_DT)
         terrain.Advance(SIM_DT)
         hmmwv.Advance(SIM_DT)
 
-    return 0
+        time += SIM_DT
 
+    return 0
 ######################################################################
 ##== CHRONO::RAY STEP 2: PARAMETER SPACE ==##
 ######################################################################
