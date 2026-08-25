@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "ChronoRay"
 version = "0.1.0"
-requires-python = ">=3.12,<3.13"
+requires-python = ">=3.9,<3.13"
 dependencies = [
     "ray[tune]>=2.34",
     "numpy",
@@ -13,9 +13,12 @@ dependencies = [
     "pandas",
     "matplotlib",
     "cloudpickle",
-    "pymc>=5,<6",
-    "arviz<1",
+    "bayesian-optimization",
 ]
+
+[project.optional-dependencies]
+calibration = ["pymc>=5,<6", "arviz<1"]
+search = ["optuna", "hyperopt", "nevergrad", "ax-platform", "hebo", "zoopt"]
 
 [tool.setuptools.packages.find]
 include = ["ChronoRay*"]
