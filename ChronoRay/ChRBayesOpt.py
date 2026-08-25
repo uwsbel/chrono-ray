@@ -80,12 +80,12 @@ class ChRBayesOpt:
                     NOTE:    mutually exclusive with FLAG_start_restore_session. If
                              both are True, FLAG_start_restore_session takes precedence.
 
-                restore_experiment_name (str) [OPTIONAL, default: "chronoray_restorable_experiment"]
+                restore_experiment_name (str) [OPTIONAL, default: "chr_bayesopt_restorable_experiment"]
                     Name of the restorable experiment. Must match between the initial
                     (FLAG_start_restore_session) run and any resumed
                     (FLAG_restore_from_previous_session) runs.
 
-                restore_experiment_storage_path (str) [OPTIONAL, default: "chronoray_restorable_storage"]
+                restore_experiment_storage_path (str) [OPTIONAL, default: "chr_bayesopt_restorable_storage"]
                     Directory (relative to the current working directory) where the
                     restorable experiment is stored. Must match between the initial
                     and resumed runs.
@@ -155,8 +155,8 @@ class ChRBayesOpt:
                 FLAG_auto_run: bool = True,
                 FLAG_start_restore_session: bool = False,
                 FLAG_restore_from_previous_session: bool = False,
-                restore_experiment_name: str = "chronoray_restorable_experiment",
-                restore_experiment_storage_path: str = "chronoray_restorable_storage") -> None:
+                restore_experiment_name: str = "chr_bayesopt_restorable_experiment",
+                restore_experiment_storage_path: str = "chr_bayesopt_restorable_storage") -> None:
 
         #1. mandatory parameters
         self.simulate_fn = simulate_fn

@@ -25,18 +25,18 @@ class ChRParamEst:
 
                 simulate_fn (Callable) [REQUIRED]
                     A PyChrono simulation function.
-                    INPUT:   config (dict) — parameter names and their sampled values.
-                    RETURNS: output (dict) — simulation output values.
+                    INPUT:   config (dict): parameter names and their sampled values.
+                    RETURNS: output (dict): simulation output values.
                     NOTE:    output keys must match target_sim_outputs keys exactly.
                     NOTE:    no visualization (e.g. Irrlicht, VSG) should take place.
 
                 est_rule (ChRParamEst.EstRule) [REQUIRED]
                     The estimator rule used to score each simulation run.
                     Available options:
-                        ChRParamEst.EstRule.LS    — least squares
-                        ChRParamEst.EstRule.MLE   — maximum likelihood      
-                        ChRParamEst.EstRule.MAP   — maximum a posteriori    
-                        ChRParamEst.EstRule.BAYES — bayesian               
+                        ChRParamEst.EstRule.LS    : least squares
+                        ChRParamEst.EstRule.MLE   : maximum likelihood      
+                        ChRParamEst.EstRule.MAP   : maximum a posteriori    
+                        ChRParamEst.EstRule.BAYES : bayesian               
 
                 param_sample_space (dict[str, ChR_Distr]) [REQUIRED]
                     Parameters to tune and their search distributions.
@@ -51,13 +51,14 @@ class ChRParamEst:
 
                 est_config (dict) [OPTIONAL, default: None]
                     Additional configuration for the estimator rule.
-                    NOTE:    not yet in use — reserved for future estimator rules.
+                    NOTE:    not yet in use (reserved for future estimator rules).
 
                 total_trials (int) [OPTIONAL, default: 10]
                     Total number of simulation trials to run.
 
                 max_concurrent_trials (int) [OPTIONAL, default: 2]
-                    Maximum number of trials running simultaneously.
+                    Maximum number of trials running simultaneously. Due to the sequential nature 
+                    of the search algorithm, it is recommended to keep this number relatively low. 
 
                 FLAG_FLAG_log_to_file (bool) [OPTIONAL, default: False]
                     If True, Ray's console output is redirected to a timestamped
@@ -67,11 +68,33 @@ class ChRParamEst:
                 FLAG_auto_run (bool) [OPTIONAL, default: True]
                     Controls the operating mode. See OPERATING MODES below.
 
+                FLAG_start_restore_session (bool) [OPTIONAL, default: False]
+                    If True, the run is written to disk as a restorable experiment
+                    so it can be resumed later. Use this for the FIRST run of a job
+                    you expect to be interrupted (e.g. cluster wall-time limits).
+
+                FLAG_restore_from_previous_session (bool) [OPTIONAL, default: False]
+                    If True, resume a previously started restorable experiment from
+                    disk instead of starting fresh. Completed trials and the search
+                    state are restored; unfinished trials continue.
+                    NOTE:    mutually exclusive with FLAG_start_restore_session. If
+                             both are True, FLAG_start_restore_session takes precedence.
+
+                restore_experiment_name (str) [OPTIONAL, default: "chr_paramest_restorable_experiment"]
+                    Name of the restorable experiment. Must match between the initial
+                    (FLAG_start_restore_session) run and any resumed
+                    (FLAG_restore_from_previous_session) runs.
+
+                restore_experiment_storage_path (str) [OPTIONAL, default: "chr_paramest_restorable_storage"]
+                    Directory (relative to the current working directory) where the
+                    restorable experiment is stored. Must match between the initial
+                    and resumed runs.
+
             --------------------------------------------------------
             OPERATING MODES:
             --------------------------------------------------------
 
-                MODE 1 — FLAG_auto_run=True (default)
+                MODE 1 (FLAG_auto_run=True, default)
                     The estimation runs immediately on construction.
                     No further configuration is possible.
 
@@ -89,7 +112,7 @@ class ChRParamEst:
                             }
                         )
 
-                MODE 2 — FLAG_auto_run=False
+                MODE 2 (FLAG_auto_run=False)
                     Construction stops after validation and config report.
                     The user can then configure optional settings via the
                     setters listed below before manually building and running.
@@ -148,22 +171,31 @@ class ChRParamEst:
                 total_trials: int = 10,
                 max_concurrent_trials: int = 2,
                 FLAG_log_to_file: bool = False,
-                FLAG_auto_run: bool = True) -> None:
+                FLAG_auto_run: bool = True,
+                FLAG_start_restore_session: bool = False,
+                FLAG_restore_from_previous_session: bool = False,
+                restore_experiment_name: str = "chr_paramest_restorable_experiment",
+                restore_experiment_storage_path: str = "chr_paramest_restorable_storage") -> None:
 
         #1. manditory parameters 
         self.simulate_fn = simulate_fn
         self.est_rule = est_rule
         self.param_sample_space = param_sample_space
         self.target_sim_outputs = target_sim_outputs
-        self.est_config = est_config
         self.total_trials = total_trials
         self.max_concurrent_trials = max_concurrent_trials
 
         #2. optional parameters 
         self.resources_per_trial = {"cpu": 1, "gpu": 0}
         self.search_alg = ChR_SearchAlg.BAYESOPT
+        self.est_config = est_config
         self.search_alg_config = {}
         self.FLAG_log_to_file = FLAG_log_to_file
+
+        self.FLAG_start_restore_session = FLAG_start_restore_session
+        self.FLAG_restore_from_previous_session = FLAG_restore_from_previous_session
+        self.restore_experiment_name = restore_experiment_name
+        self.restore_experiment_storage_path = restore_experiment_storage_path
 
         self._validate_inputs()
         self._report_config()
@@ -234,6 +266,10 @@ class ChRParamEst:
         print(f"  5. est_config         : {self.est_config}")
         print(f"  6. search_algorithm   : {self.search_alg.name}")
         print(f"  7. FLAG_log_to_file        : {self.FLAG_log_to_file}")
+        print(f"  8. FLAG_start_restore_session         : {self.FLAG_start_restore_session}")
+        print(f"  9. FLAG_restore_from_previous_session : {self.FLAG_restore_from_previous_session}")
+        print(f" 10. restore_experiment_name           : {self.restore_experiment_name}")
+        print(f" 11. restore_experiment_storage_path   : {self.restore_experiment_storage_path}")
 
         if self.search_alg == ChR_SearchAlg.BAYESOPT:
             print(f"     NOTE: default search algorithm in use.")
@@ -306,6 +342,10 @@ class ChRParamEst:
             mode=mode,
             search_algorithm=self.search_alg,
             search_kwargs=self.search_alg_config,
+            FLAG_start_restore_session=self.FLAG_start_restore_session,
+            FLAG_restore_from_previous_session=self.FLAG_restore_from_previous_session,
+            restore_experiment_name=self.restore_experiment_name,
+            restore_experiment_storage_path=self.restore_experiment_storage_path,
         )
 
     def run(self) -> None:

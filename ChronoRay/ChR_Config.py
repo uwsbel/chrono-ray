@@ -21,7 +21,9 @@ Searcher          | needs metric/mode | supports concurrent | typical use
 RANDOM            | no                | yes (unlimited)     | baseline / large spaces
 GRID              | no                | yes (unlimited)     | small discrete spaces
 BAYESOPT          | yes               | limited (1-8)       | cheap fn, small param count
-OPTUNA            | yes               | yes                 | general purpose, most popular
+OPTUNA_TPE        | yes               | yes                 | general purpose (default)
+OPTUNA_CMAES      | yes               | yes                 | continuous spaces (no categoricals)
+OPTUNA_GP         | yes               | yes                 | GP Bayesian (overlaps BAYESOPT)
 HYPEROPT          | yes               | limited             | tree-structured spaces
 BOHB              | yes               | limited             | needs paired BOHB scheduler
 AX                | yes               | yes                 | expensive fn, constraints
@@ -34,19 +36,21 @@ class ChR_SearchAlg(Enum):
     """
     Ray Tune search algorithms.
 
-    Pass as `search_algorithm=ChronoRaySearchAlgorithm.OPTUNA` (etc.) to ChronoRay.
+    Pass as `search_algorithm=ChR_SearchAlg.OPTUNA_TPE` (etc.) to ChronoRay.
 
-    RANDOM      - uniform random sampling (no extra dependency)
-    GRID        - exhaustive grid search  (no extra dependency)
-    BAYESOPT    - Gaussian-process Bayesian optimisation  [pip: bayesian-optimization]
-    OPTUNA      - Optuna TPE / CMA-ES / others            [pip: optuna]
-    HYPEROPT    - Tree-structured Parzen Estimators        [pip: hyperopt]
-    BOHB        - Bayesian Optimisation + HyperBand        [pip: hpbandster ConfigSpace]
-                  Must be paired with TrialScheduler.BOHB_SCHED
-    AX          - Adaptive Experimentation Platform        [pip: ax-platform]
-    HEBO        - Heteroscedastic Evolutionary BO          [pip: hebo]
-    NEVERGRAD   - Gradient-free optimisation toolbox       [pip: nevergrad]
-    ZOOPT       - Zeroth-order optimisation                [pip: zoopt]
+    RANDOM        : uniform random sampling (no extra dependency)
+    GRID          : exhaustive grid search (no extra dependency)
+    BAYESOPT      : Gaussian-process Bayesian optimisation  [pip: bayesian-optimization]
+    OPTUNA_TPE    : Optuna Tree-structured Parzen Estimator, default  [pip: optuna]
+    OPTUNA_CMAES  : Optuna CMA-ES evolutionary strategy, no categoricals  [pip: optuna]
+    OPTUNA_GP     : Optuna Gaussian-process Bayesian opt, overlaps BAYESOPT  [pip: optuna, torch, scipy]
+    HYPEROPT      : Tree-structured Parzen Estimators  [pip: hyperopt]
+    BOHB          : Bayesian Optimisation + HyperBand  [pip: hpbandster ConfigSpace]
+                    Must be paired with TrialScheduler.BOHB_SCHED
+    AX            : Adaptive Experimentation Platform  [pip: ax-platform]
+    HEBO          : Heteroscedastic Evolutionary BO  [pip: hebo]
+    NEVERGRAD     : Gradient-free optimisation toolbox  [pip: nevergrad]
+    ZOOPT         : Zeroth-order optimisation  [pip: zoopt]
     """
     def __new__(cls, sequential, metric_mode):
         obj = object.__new__(cls)
@@ -71,7 +75,7 @@ class ChR_SearchAlg(Enum):
                 RANDOM    - no extra dependency
                 GRID      - no extra dependency
                 BAYESOPT  - pip install bayesian-optimization
-                OPTUNA    - pip install optuna
+                OPTUNA_*  - pip install optuna
                 HYPEROPT  - pip install hyperopt
                 BOHB      - pip install hpbandster ConfigSpace
                 AX        - pip install ax-platform
@@ -81,17 +85,18 @@ class ChR_SearchAlg(Enum):
         """))
         print("========================================================")
 
-    RANDOM    = (False, False)
-    GRID      = (False, False)
-    BAYESOPT  = (True,  True)
-    METROPOLIS = (True, True)
-    OPTUNA    = (False, True)
-    HYPEROPT  = (True,  True)
-    BOHB      = (True,  True)
-    AX        = (False, True)
-    HEBO      = (True,  True)
-    NEVERGRAD = (False, True)
-    ZOOPT     = (True,  True)
+    RANDOM          = (False, False)
+    GRID            = (False, False)
+    BAYESOPT        = (True,  True)
+    OPTUNA_TPE      = (False, True)
+    OPTUNA_CMAES    = (False, True)
+    OPTUNA_GP       = (False, True)
+    HYPEROPT        = (True,  True)
+    BOHB            = (True,  True)
+    AX              = (False, True)
+    HEBO            = (True,  True)
+    NEVERGRAD       = (False, True)
+    ZOOPT           = (True,  True)
 
 #================================================================================
 # 2. DISTRIBUTIONS

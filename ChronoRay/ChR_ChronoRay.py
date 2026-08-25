@@ -183,13 +183,23 @@ class ChR_ChronoRay:
             from ray.tune.search.bayesopt import BayesOptSearch
             searcher = BayesOptSearch(**kw)
 
-        elif alg == ChR_SearchAlg.METROPOLIS:
-            from ChronoRay.ChRBayesCali import PriorMetropolisSearch
-            searcher = PriorMetropolisSearch(**kw)
-
-        elif alg == ChR_SearchAlg.OPTUNA:
+        elif alg == ChR_SearchAlg.OPTUNA_TPE:
             from ray.tune.search.optuna import OptunaSearch
-            searcher = OptunaSearch(**kw)
+            from optuna.samplers import TPESampler
+            sampler_kwargs = kw.pop("sampler_kwargs", {})
+            searcher = OptunaSearch(sampler=TPESampler(**sampler_kwargs), **kw)
+
+        elif alg == ChR_SearchAlg.OPTUNA_CMAES:
+            from ray.tune.search.optuna import OptunaSearch
+            from optuna.samplers import CmaEsSampler
+            sampler_kwargs = kw.pop("sampler_kwargs", {})
+            searcher = OptunaSearch(sampler=CmaEsSampler(**sampler_kwargs), **kw)
+
+        elif alg == ChR_SearchAlg.OPTUNA_GP:
+            from ray.tune.search.optuna import OptunaSearch
+            from optuna.samplers import GPSampler
+            sampler_kwargs = kw.pop("sampler_kwargs", {})
+            searcher = OptunaSearch(sampler=GPSampler(**sampler_kwargs), **kw)
 
         elif alg == ChR_SearchAlg.HYPEROPT:
             from ray.tune.search.hyperopt import HyperOptSearch
@@ -323,7 +333,11 @@ class ChR_ChronoRay:
                 configure_logging=False
             )
 
-        self._search_alg = None if self.FLAG_restore_from_previous_session else self._build_search_alg()
+        # build the searcher for this run. GRID returns None (Ray handles it
+        # internally). The searcher's saved state is loaded below in the resume
+        # branch so get_searcher() returns a correctly-stated searcher object
+        # afterward (e.g. to read an MCMC chain once the resumed run completes).
+        self._search_alg = self._build_search_alg()
 
         trainable = tune.with_resources(
             self._trial,
@@ -347,6 +361,12 @@ class ChR_ChronoRay:
         elif self.FLAG_restore_from_previous_session:
             restore_dir = os.path.join(self.restore_experiment_storage_path, self.restore_experiment_name)
             if tune.Tuner.can_restore(restore_dir):
+                # Tuner.restore reloads the searcher + its state from disk to
+                # drive the resumed run. It does not accept a search_alg argument,
+                # so we also load the saved state into our own searcher here so
+                # get_searcher() works after the resumed run.
+                if self._search_alg is not None:
+                    self._search_alg.restore_from_dir(restore_dir)
                 tuner = tune.Tuner.restore(
                     restore_dir,
                     trainable=trainable,
